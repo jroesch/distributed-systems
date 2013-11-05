@@ -25,7 +25,7 @@ object ReplicatedLog extends SafeApp {
     _ <- foreverIO(loop(messages, nodes, console))
   } yield ()
   
-  type KVStore = Map[String, Int]
+  type KVStore = Map[String, Option[Int]]
 
   val freshNodes: IO[Vector[Node]] = for {
     n1 <- node(0)
@@ -45,9 +45,11 @@ object ReplicatedLog extends SafeApp {
   
   def interpret(messages: IORef[Map[Int, Message]], nodes: Vector[Node], c: Command): IO[String] = c match {
     case Increment(nodeN, key) =>
-      nodes(nodeN).increment(key).map(_.toString)
+      nodes(nodeN).increment(key).map(_.get.toString)
+    case Decrement(nodeN, key) =>
+      nodes(nodeN).decrement(key).map(_.get.toString)
     case GetValue(nodeN, key) =>
-      nodes(nodeN).get(key).map(x => if (x == 0) "null" else x.toString)
+      nodes(nodeN).get(key).map(x => x match { case None => "null"; case Some(x) => x.toString })
     case SendLog(from, to) =>
       nodes(from).send(to).flatMap(queueMsg(messages, _)).map(_.toString)
     case ReceiveLog(tn) =>
@@ -94,9 +96,40 @@ object ReplicatedLog extends SafeApp {
         } yield x :: y :: HNil
       }
   }
+  
+  def sequenceP[H <: HList, K[_]](l: H)(implicit seq: Sequencer[H, K], tc: UnaryTCConstraint[H, K], m: Monad[K]): seq.Out = seq(l)
+
+  trait Sequencer[L <: HList, K[_]] extends DepFn1[L]
+
+  object Sequencer {
+    def apply[L <: HList, K[_]: Applicative](implicit sequencer: Sequencer[L, K]): Aux[L, K, sequencer.Out] = sequencer
+
+    type Aux[L <: HList, K0[_], Out0] = Sequencer[L, K0] { type Out = Out0 }
+    
+   /* implicit def hnilSequencer[K[_]]: Aux[HNil, K[_], HNil] = 
+      new Sequencer[HNil, K] {
+        type Out = HNil
+      }
+    } */
+        
+    implicit def hsingleSequencer[H, K[_]: Applicative]: Aux[K[H] :: HNil, K, K[H :: HNil]] =
+      new Sequencer[K[H] :: HNil, K] {
+        type Out = K[H :: HNil]
+        def apply(l: K[H] :: HNil): Out = Applicative[K].apply(l.head)(_ :: HNil)
+      }
+    
+    implicit def hlistSequencer[H, T <: HList, K[_]: Applicative, OutT <: HList]
+      (implicit s: Sequencer.Aux[T, K, K[OutT]]): Aux[K[H] :: T, K, K[H :: OutT]] =
+      new Sequencer[K[H] :: T, K] {
+        type Out = K[H :: OutT]
+        def apply(l : K[H] :: T): Out = 
+          Applicative[K].apply2(l.head, s(l.tail))(_ :: _)
+      } 
+  }
 
   def command: Parser[Command] = (
     string("Increment")  ~> args((int <~ argComma) :: qstring :: HNil).map(p => Increment(p(0) - 1, p(1)))
+  | string("Decrement")  ~> args((int <~ argComma) :: qstring :: HNil).map(p => Decrement(p(0) - 1, p(1)))
   | string("getValue")   ~> args((int <~ argComma) :: qstring :: HNil).map(p => GetValue(p(0) - 1, p(1))) 
   | string("PrintState") ~> args(int :: opt(string("")) :: HNil).map(p => PrintState(p(0) - 1))
   | string("SendLog")    ~> args((int <~ argComma) :: int :: HNil).map(p => SendLog(p(0) - 1, p(1) - 1))
@@ -105,6 +138,7 @@ object ReplicatedLog extends SafeApp {
   
   sealed trait Command
   case class Increment(node: Int, key: String) extends Command
+  case class Decrement(node: Int, key: String) extends Command
   case class GetValue(node: Int, key: String) extends Command
   case class PrintState(node: Int) extends Command
   case class SendLog(to: Int, from: Int) extends Command
@@ -128,6 +162,10 @@ object ReplicatedLog extends SafeApp {
     override def toString = s"increment($name)"
   }
 
+  case class Dec(name: String) extends LogOp {
+    override def toString = s"decrement($name)"
+  }
+
   case class LogEntry(operation: LogOp, node: Int, time: Int) {
     override def toString = operation.toString
   }
@@ -136,7 +174,7 @@ object ReplicatedLog extends SafeApp {
   case class Node private[ReplicatedLog] (
      label: Int, 
      log: IORef[Queue[LogEntry]], 
-     store: IORef[Map[String, Int]],
+     store: IORef[Map[String, Option[Int]]],
      table: IORef[TTable]
     )
   {
@@ -144,12 +182,12 @@ object ReplicatedLog extends SafeApp {
       table(k)(e.node) >= e.time
     }
 
-    def get(k: String): IO[Int] = store.read.map(_(k))
+    def get(k: String): IO[Option[Int]] = store.read.map(_(k))
 
-    def increment(k: String): IO[Int] = for {
+    def increment(k: String): IO[Option[Int]] = for {
       v <- store.mod { s => 
-        val v = s(k)
-        s + ((k, v + 1))
+        val v = s(k).getOrElse(0)
+        s + ((k, Some(v + 1)))
       }
       t <- table.mod { t => 
           val row = t(label)
@@ -158,6 +196,20 @@ object ReplicatedLog extends SafeApp {
       }
       _ <- log.mod(l => l.enqueue(LogEntry(Inc(k), label, t(label)(label))))
     } yield v(k)
+
+    def decrement(k: String): IO[Option[Int]] = for {
+      v <- store.mod { s => 
+        val v = s(k).getOrElse(0)
+        s + ((k, Some(v - 1)))
+      }
+      t <- table.mod { t => 
+          val row = t(label)
+          val v = row(label)
+          t updated (label, row updated (label, v + 1))
+      }
+      _ <- log.mod(l => l.enqueue(LogEntry(Dec(k), label, t(label)(label))))
+    } yield v(k)
+
 
     def printState: IO[String] = for {
       t <- table.read
@@ -182,9 +234,10 @@ object ReplicatedLog extends SafeApp {
        
         val updateLog = log.mod(l => l ++ nlog)
 
-        val updateS = for {
-          LogEntry(Inc(key), _, _) <- nlog.toList
-        } yield store.mod(m => m + ((key, (m(key) + 1))))
+        val updateS = nlog.toList.map { x => x match {
+          case LogEntry(Inc(key), _, _) => store.mod(m => m + ((key, Some((m(key).getOrElse(0) + 1)))))
+          case LogEntry(Dec(key), _, _) => store.mod(m => m + ((key, Some((m(key).getOrElse(0) - 1)))))
+        }}
 
         val updateT = table.mod { tb => 
           val iT = for {
@@ -209,7 +262,7 @@ object ReplicatedLog extends SafeApp {
 
   def node(label: Int): IO[Node] = for {
     lref <- newIORef(Queue.empty[LogEntry])
-    sref <- newIORef(Map.empty[String, Int].withDefaultValue(0))
+    sref <- newIORef(Map.empty[String, Option[Int]].withDefaultValue(None))
     tref <- newIORef((1 to 3).map(_ => Vector(0, 0, 0)).toVector) 
   } yield new Node(label, lref, sref, tref)
 }
@@ -225,4 +278,4 @@ case class Console(prompt: String) {
   def readLine: IO[String] = 
     io(rw => done(rw -> { console.readLine() }))
 }
-    
+
