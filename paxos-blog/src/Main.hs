@@ -47,27 +47,6 @@ promise :: (Value a) => Integer -> Integer -> a
 
 leaderWait leader
 
--- does prepare part of paxos for acceptors
-prepare :: Ballot -> Replica ()
-prepare bal = do
-  s <- get
-  case bal >= ballotNum b of
-    True  -> do
-      put $ s {ballotNum = bal}
-      send $ ack bal (acceptNum s) (acceptVal s) 
-    False -> () 
-
--- accepting for acceptors
-accept :: Ballot -> Entry -> Replica ()
-accept b v = do
-  s <- get
-  case b >= ballotNum b of
-    True -> do
-      if acceptNum s != b && acceptVal != v then do
-        put $ s {acceptNum = b, acceptVal = v}
-        broadcast $ accpt b v
-
-
 -- start prepare stage for proposer
 propose :: Replica ()
 propose = do
@@ -95,3 +74,27 @@ paccept val = do
       case m of
         Ack bal b v -> if i + 1 > size (dir s) then a else loop m:a (i+1)
         _           -> loop a i
+
+acceptor :: Message -> Replica ()
+acceptor msg = do
+    s <- get
+    case msg of
+      Prepare bn | bn >= ballotNum s -> do
+        put $ s {ballotNum = bn}
+        send $ Ack bn (acceptNum s) (acceptVal s)
+      Accept b v | b >= ballotNum b -> do
+        -- ensure we dont send accept message multiple times
+        if acceptNum s != b && acceptVal != v then do
+          put $ s {acceptNum = b, acceptVal = v}
+          broadcast $ Accept b v
+      Decide 
+      _ -> ()
+
+proposer :: Message -> Replica ()
+proposer msg = do
+    s <- get
+    case msg of
+      Accept b v -> do
+        -- grab messages until we get a majority
+        return ()
+      _ -> ()
