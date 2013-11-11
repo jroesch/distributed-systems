@@ -22,6 +22,7 @@ type ReplicaState = { ballotNum :: Ballot
                     , leader    :: Int
                     , id        :: Int
                     , dir       :: Directory
+                    , acceptedM :: ([Message], Int)
                     } deriving (Show, Eq)
 type Replica a = StateT ReplicaState IO a
 
@@ -90,11 +91,21 @@ acceptor msg = do
       Decide 
       _ -> ()
 
-proposer :: Message -> Replica ()
-proposer msg = do
+proposer :: String -> Message -> Replica ()
+proposer value msg = do
     s <- get
     case msg of
-      Accept b v -> do
-        -- grab messages until we get a majority
-        return ()
+      Ack bn b v | bn == ballotNum s -> do
+        let (oldL, oldC) = acceptedM s
+        let newL = msg : oldL
+        let newC = oldC + 1
+        if newC > size (dir s) then do
+          let new = if all (\(Ack bal b v) -> isNone v) newL then
+              value
+            else 
+              v where
+                Ack a b v = maximumBy (\(Ack _ a _ ) (Ack _ b _) -> compare a b) newL
+          put $ s {acceptVal = new}
+          send $ accpt (ballotNum s) new
+        else put $ s {acceptedM = (newL, newC)}
       _ -> ()
