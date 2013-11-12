@@ -1,6 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 module Paxos.Directory.Local 
-  ( Directory,
+  {- ( Directory,
     Process,
     Pid,
     mkDirectory,
@@ -8,7 +8,7 @@ module Paxos.Directory.Local
     send,
     receive,
     broadcast
-  ) where
+  ) -} where
 
 import qualified Control.Concurrent.Chan as C
 import Data.Functor ((<$>))
@@ -47,7 +47,7 @@ receive p @ (Process _ chan) = debugIO title (show p) $ C.readChan chan
   where title = "paxos.message.receive"
 
 broadcast :: Directory -> Message -> IO ()
-broadcast d m = mapM_ receive $ M.elems d
+broadcast d m = mapM_ (\p -> send d p m)  $ M.keys d
 
 debugIO :: String -> String -> IO a -> IO a
 debugIO name msg action = do
