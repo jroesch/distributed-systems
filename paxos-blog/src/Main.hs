@@ -2,6 +2,8 @@ module Main where
 
 import Data.Functor ((<$>))
 import Data.IORef
+import Control.Concurrent
+import Control.Monad.State
 import Control.Monad
 import Control.Concurrent.Chan
 import qualified Data.Map as M
@@ -27,19 +29,21 @@ main = do
 
 runAcceptor :: Directory -> Int -> IO ()
 runAcceptor dir pid = do
-  state <- initialState pid
+  let state = initialState dir pid
   execStateT (forever $ do
-    msg <- receive (pLookup dir pid)
+    msg <- lift $ receive (plookup dir pid)
     acceptor msg)
     state
+  return ()
 
 runProposer :: Directory -> Int -> String -> IO ()
 runProposer dir pid entry = do
-    state <- initialState pid
+    let state = initialState dir pid
     execStateT (do
       propose
       forever $ do
-        msg <- receive (pLookup dir pid)
+        msg <- lift $ receive (plookup dir pid)
         proposer entry msg
       )
       state
+    return ()
