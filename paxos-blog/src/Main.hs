@@ -12,6 +12,9 @@ import System.Console.Haskeline
 import Paxos
 import Paxos.Directory
 
+import System.Log.Logger
+import System.Log.Handler.Simple
+
 -- main = runInputT defaultSettings loop
 --   where loop = do
 --           minput <- getInputLine "> "
@@ -23,6 +26,8 @@ import Paxos.Directory
 --               loop
 
 main = do
+  fh <- fileHandler "log/paxos.log" DEBUG
+  updateGlobalLogger rootLoggerName (addHandler fh)
   dir <- mkDirectory [1..5]
   forM [1..4] (forkIO . runAcceptor dir)
   runProposer dir 1 "hi"

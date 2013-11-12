@@ -14,6 +14,7 @@ import qualified Control.Concurrent.Chan as C
 import Data.Functor ((<$>))
 import qualified Data.Map as M
 import Paxos.Message (Message)
+import System.Log.Logger
 
 type Pid = Int
 
@@ -37,13 +38,19 @@ plookup dir pid = case pid `M.lookup` dir of
 
 send :: Directory -> Pid -> Message -> IO ()
 send dir pid msg = 
-  let (Process _ chan) = plookup dir pid in
-    C.writeChan chan msg
+  let p @ (Process _ chan) = plookup dir pid in
+    infoIO title (show p) $ C.writeChan chan msg
+  where title = "message.send"
 
 receive :: Process -> IO Message
-receive (Process _ chan) = C.readChan chan
+receive p @ (Process _ chan) = infoIO title (show p) $ C.readChan chan
+  where title = "message.receive"
 
 broadcast :: Directory -> Message -> IO ()
-broadcast d m = mapM_ writeMessage processes 
-  where processes = map snd $ M.toList d
-        writeMessage (Process _ chan) = C.writeChan chan m
+broadcast d m = mapM_ receive $ M.elems d
+
+infoIO :: String -> String -> IO a -> IO a
+infoIO name msg action = do
+    r <- action
+    infoM name msg
+    return r
