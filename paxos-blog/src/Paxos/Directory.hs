@@ -44,4 +44,6 @@ receive :: Process -> IO Message
 receive (Process _ chan) = C.readChan chan
 
 broadcast :: Directory -> Message -> IO ()
-broadcast d m = undefined
+broadcast d m = mapM_ writeMessage processes 
+  where processes = map snd $ M.toList d
+        writeMessage (Process _ chan) = C.writeChan chan m
