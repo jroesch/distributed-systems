@@ -45,9 +45,3 @@ receive (Process _ chan) = C.readChan chan
 
 broadcast :: Directory -> Message -> IO ()
 broadcast d m = undefined
-
-
-
-
-
-
