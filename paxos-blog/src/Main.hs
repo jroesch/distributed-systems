@@ -28,6 +28,8 @@ import System.Log.Handler.Simple
 main = do
   fh <- fileHandler "log/paxos.log" DEBUG
   updateGlobalLogger rootLoggerName (addHandler fh)
+  updateGlobalLogger "paxos" (setLevel DEBUG)
+  debugM "paxos" "Starting up application..."
   dir <- mkDirectory [1..5]
   forM [1..4] (forkIO . runAcceptor dir)
   runProposer dir 1 "hi"
