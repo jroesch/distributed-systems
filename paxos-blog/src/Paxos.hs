@@ -16,7 +16,8 @@ data PaxosState = PaxosState {
   -- , leader    :: Bool
   , ident     :: Int
   , dir       :: D.Directory
-  , acceptedM :: ([Message], Int) -- clean this up
+  , ackM      :: ([Message], Int) -- clean this up
+  , acceptedM :: Int -- clean this up
   } deriving (Show, Eq)
 
 type PaxosInstance a = StateT PaxosState IO a
@@ -30,7 +31,8 @@ initialState d pid =
     -- leader    =
     ident     = pid, 
     dir       = d,
-    acceptedM = ([], 0)
+    ackM      = ([], 0),
+    acceptedM = 0
   }
 
 broadcastP :: Message -> PaxosInstance ()
@@ -68,13 +70,14 @@ acceptor msg = do
           broadcastP $ Accept b v
         else return ()
       Decide v -> return () -- placeholder
+      otherwise -> return ()
 
 proposer :: String -> Message -> PaxosInstance ()
 proposer value msg = do
     s <- get
     case msg of
       Ack bn b v | bn == ballotNum s -> do
-        let (oldL, oldC) = acceptedM s
+        let (oldL, oldC) = ackM s
         let newL = msg : oldL
         let newC = oldC + 1
         if newC > M.size (dir s) 
@@ -84,7 +87,15 @@ proposer value msg = do
                         else maxAck newL
             put $ s { acceptVal = new }
             sendP 1 $ Accept (ballotNum s) new
-          else put $ s {acceptedM = (newL, newC)} -- clean up acceptM
+          else put $ s {ackM = (newL, newC)} -- clean up acceptM
+      Accept b v -> do
+        let new = acceptedM s + 1
+        put $ s {acceptedM = new}
+        if new >= M.size (dir s) - 1 -- one failure
+          then case v of
+            Just v' -> lift $ putStrLn v'
+            Nothing -> return ()
+        else return ()
       _ -> return ()
 
 {- proposer' = do

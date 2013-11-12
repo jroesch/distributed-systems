@@ -25,7 +25,7 @@ import Paxos.Directory
 main = do
   dir <- mkDirectory [1..5]
   forM [1..4] (forkIO . runAcceptor dir)
-  forkIO $ runProposer dir 1 "hi"
+  runProposer dir 1 "hi"
 
 runAcceptor :: Directory -> Int -> IO ()
 runAcceptor dir pid = do

@@ -11,3 +11,5 @@ What does periodically send mean?
 If we constraint reads and writes to a single leader, how does performance suffer?
 
 What is an instance of the algorithm?
+
+In decision, does the b, v match what we sent before?
