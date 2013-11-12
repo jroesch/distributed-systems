@@ -21,15 +21,15 @@ data PaxosState = PaxosState {
 
 type PaxosInstance a = StateT PaxosState IO a
 
-initialState :: D.Pid -> IO PaxosState
-initialState pid = D.mkDirectory [1..5] >>= \d' ->
-  return $ PaxosState { 
+initialState :: D.Directory -> D.Pid -> PaxosState
+initialState d pid = 
+  PaxosState { 
     ballotNum = Ballot (0, pid),
     acceptNum = Ballot (0, 0),
     acceptVal = Nothing,
     -- leader    =
     ident     = pid, 
-    dir       = d',
+    dir       = d,
     acceptedM = ([], 0)
   }
 
