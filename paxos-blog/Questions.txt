@@ -2,4 +2,12 @@ Questions
 
 In accept phase for acceptor, if we recieve a larger ballot number, do we update our ballot number
 
+Do we need to send the whole version of log in the algo or do we just send the new log entry we want.
 
+What happens when to proposers try to propose at the same time?
+
+What does periodically send mean?
+
+If we constraint reads and writes to a single leader, how does performance suffer?
+
+What is an instance of the algorithm?
