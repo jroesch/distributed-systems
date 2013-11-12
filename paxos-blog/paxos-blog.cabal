@@ -17,4 +17,5 @@ executable paxos-blog
     mtl >= 2.1,
     transformers >= 0.3.0.0,
     lens >= 3.10,
-    free >= 4
+    free >= 4,
+    haskeline >= 0.7.0.3

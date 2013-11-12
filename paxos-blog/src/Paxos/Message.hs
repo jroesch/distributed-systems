@@ -1,4 +1,18 @@
 module Paxos.Message where
 
-data Message = M deriving (Show, Eq)
+type Value = Maybe String
+
+newtype Ballot = Ballot (Int, Int) deriving (Show, Eq)
+
+instance Ord Ballot where
+  compare (Ballot (a, b)) (Ballot (c, d)) = 
+    case compare a c of
+      EQ -> compare b d
+      o  -> o
+
+data Message = Prepare Ballot 
+             | Ack Ballot Ballot Value 
+             | Accept Ballot Value 
+             | Decide Value
+             deriving (Show, Eq)
 

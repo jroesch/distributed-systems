@@ -1,5 +1,14 @@
 {-# LANGUAGE TupleSections #-}
-module Paxos.Directory where
+module Paxos.Directory 
+  ( Directory,
+    Process,
+    Pid,
+    mkDirectory,
+    plookup,
+    send,
+    receive,
+    broadcast
+  ) where
 
 import qualified Control.Concurrent.Chan as C
 import Data.Functor ((<$>))
@@ -7,9 +16,11 @@ import qualified Data.Map as M
 import Paxos.Message (Message)
 
 type Pid = Int
-type Message = String 
 
-data Process = Process Pid (C.Chan Message) deriving (Show, Eq)
+data Process = Process Pid (C.Chan Message) deriving (Eq)
+
+instance Show Process where
+  show (Process pid _) = "Process " ++ show pid
 
 type Directory = M.Map Pid Process
 
@@ -32,8 +43,5 @@ send dir pid msg =
 receive :: Process -> IO Message
 receive (Process _ chan) = C.readChan chan
 
-
-
-
-
-
+broadcast :: Directory -> Message -> IO ()
+broadcast d m = undefined
