@@ -95,7 +95,7 @@ proposer value msg = do
       Accept b v -> do
         let new = acceptedM s + 1
         put $ s {acceptedM = new}
-        if new == M.size (dir s) - 1 -- one failure
+        if new == M.size (dir s) - 1 -- TODO: one failure
           then case v of
             Just v' -> lift $ putStrLn $ show (ident s) ++ " accepted " ++ show v'
             Nothing -> return ()
