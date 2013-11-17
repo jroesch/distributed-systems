@@ -11,6 +11,8 @@ executable paxos-blog
     Main.hs  
   build-depends:
     base >= 4 && <= 5,
+    bytestring >= 0.10.0.2,
+    cereal >= 0.4.0.0,
     containers >= 0.5.0.0,
     parsec >= 3,
     text >= 0.11 && <= 0.12,
@@ -19,4 +21,6 @@ executable paxos-blog
     lens >= 3.10,
     free >= 4,
     haskeline >= 0.7.0.3,
-    hslogger >= 1.2.3
+    hslogger >= 1.2.3,
+    network >= 2.4.2.0,
+    either >= 4.0

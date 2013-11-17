@@ -12,6 +12,7 @@ import System.Console.Haskeline
 import Paxos
 import Paxos.Message
 import Paxos.Directory
+import Paxos.Remote
 
 import System.Log.Logger
 import System.Log.Handler.Simple
