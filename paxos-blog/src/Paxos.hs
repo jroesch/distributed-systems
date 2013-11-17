@@ -48,10 +48,13 @@ sendP p m = do
 propose :: PaxosInstance ()
 propose = do
   s <- get
-  let Ballot (prev, _) = ballotNum s
-  let new = Ballot (prev + 1, ident s)
-  put (s {ballotNum = new})
-  broadcastP $ Prepare new
+  if ident s == 1 then do
+    let Ballot (prev, _) = ballotNum s
+    let new = Ballot (prev + 1, ident s)
+    put (s {ballotNum = new})
+    broadcastP $ Prepare new
+  else
+    return ()
 
 maxAck :: [Message] -> Value -- bad assumptions here, that all message will match this pattern
 maxAck acks = let Ack a b v = maximumBy (\(Ack _ a _ ) (Ack _ b _) -> compare a b) acks in v
@@ -62,11 +65,12 @@ acceptor msg = do
     case msg of
       Prepare bn | bn >= ballotNum s -> do
         put $ s {ballotNum = bn}
-        sendP 1 $ Ack bn (acceptNum s) (acceptVal s)
+        broadcastP $ Ack bn (acceptNum s) (acceptVal s)
       Accept b v | b >= ballotNum s -> do -- Fix maybe code here
         -- ensure we dont send accept message multiple times
-        if (acceptNum s) /= b && (acceptVal s) /= v then do
+        if (acceptNum s) /= b then do
           put $ s {acceptNum = b, acceptVal = v}
+          new <- get
           broadcastP $ Accept b v
         else return ()
       Decide v -> return () -- placeholder
@@ -80,20 +84,20 @@ proposer value msg = do
         let (oldL, oldC) = ackM s
         let newL = msg : oldL
         let newC = oldC + 1
-        if newC > M.size (dir s) 
+        if newC > div (M.size (dir s)) 2 && acceptNum s /= bn
           then do
             let new = if all (\(Ack bal b v) -> isNothing v) newL 
                         then Just value
                         else maxAck newL
-            put $ s { acceptVal = new }
-            sendP 1 $ Accept (ballotNum s) new
+            put $ s { acceptVal = new, acceptNum = bn }
+            broadcastP $ Accept (ballotNum s) new
           else put $ s {ackM = (newL, newC)} -- clean up acceptM
       Accept b v -> do
         let new = acceptedM s + 1
         put $ s {acceptedM = new}
-        if new >= M.size (dir s) - 1 -- one failure
+        if new == M.size (dir s) - 1 -- one failure
           then case v of
-            Just v' -> lift $ putStrLn v'
+            Just v' -> lift $ putStrLn $ show (ident s) ++ " accepted " ++ show v'
             Nothing -> return ()
         else return ()
       _ -> return ()

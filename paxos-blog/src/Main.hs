@@ -20,7 +20,7 @@ import System.Log.Handler.Simple
 runConsole :: IO ()
 runConsole = runInputT defaultSettings loop
     where loop = do
-            minput <- getInputLine "> "
+            minput <- getInputLine ""
             case minput of
               Nothing     -> return ()
               Just "exit" -> return ()
@@ -40,29 +40,18 @@ setupLogging action = do
 main :: IO ()
 main = setupLogging $ do
   directory <- mkDirectory [1..5]
-  let state = initialState directory 1
-  forM [1..4] (forkIO . runAcceptor state)
-  _ <- forkFinally (runProposer (state) 1 "hi") $ \c -> case c of
-          Left  e -> error $ show e
-          Right _ -> error "Done"
+  let state = initialState directory
+  forM [1..5] (\i -> forkIO $ runPaxos directory i "hi")
   runConsole
 
-execPaxos :: PaxosState -> PaxosInstance a -> IO ()
-execPaxos st p = execStateT p st >> return ()
-
-runAcceptor :: PaxosState -> Int -> IO ()
-runAcceptor st pid = do
-  forever $ execPaxos st $ do
-    s <- get
-    msg <- lift $ receive (plookup (dir s) pid)
-    acceptor msg
-  return ()
-
-runProposer :: PaxosState -> Int -> String -> IO ()
-runProposer st pid entry = stRun >> return ()
-  where stRun = execPaxos st $ do
-          propose
-          forever $ do
-            s <- get
-            msg <- lift $ receive (plookup (dir s) pid)
-            proposer entry msg
+runPaxos :: Directory -> Int -> String -> IO ()
+runPaxos dir pid entry = do
+  let state = initialState dir pid
+  sp <- execStateT propose state
+  loop sp state
+  where
+    loop ps as = do
+      msg <- receive (plookup dir pid)
+      ps' <- execStateT (proposer entry msg) ps
+      as' <- execStateT (acceptor msg) as
+      loop ps' as'
