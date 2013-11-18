@@ -1,6 +1,8 @@
+{-# LANGUAGE TemplateHaskell #-}
 module Paxos where
 
 import Control.Monad.State
+import Control.Lens
 import Data.Maybe
 import qualified Data.Map as M
 import Data.List
@@ -9,49 +11,73 @@ import Data.Functor
 import Paxos.Message
 import qualified Paxos.Directory as D
 
-data PaxosState = PaxosState { 
-    ballotNum :: Ballot
-  , acceptNum :: Ballot
-  , acceptVal :: Value
-  -- , leader    :: Bool
-  , ident     :: Int
-  , dir       :: D.Directory
-  , ackM      :: ([Message], Int) -- clean this up
-  , acceptedM :: Int -- clean this up
-  } deriving (Show, Eq)
+data ProcessState = ProcessState {
+    _ident  :: Int
+  , _dir    :: D.Directory
+  , _pState :: ProposerState
+  , _aState :: AcceptorState
+  } deriving (Show)
 
-type PaxosInstance a = StateT PaxosState IO a
+data ProposerState = ProposerState {
+    _pBallotNum :: Ballot
+  , _pAcceptNum :: Ballot
+  , _pAcceptVal :: Value
+  , _ackM      :: ([Message], Int) -- clean this up
+  , _acceptedM :: Int -- clean this up
+  } deriving (Show)
 
-initialState :: D.Directory -> D.Pid -> PaxosState
+data AcceptorState = AcceptorState {
+    _aBallotNum :: Ballot
+  , _aAcceptNum :: Ballot
+  , _aAcceptVal :: Value
+  } deriving (Show)
+
+makeLenses ''ProposerState
+makeLenses ''AcceptorState
+makeLenses ''ProcessState
+
+type PaxosInstance a = StateT ProcessState IO a
+
+initialState :: D.Directory -> D.Pid -> ProcessState
 initialState d pid = 
-  PaxosState { 
-    ballotNum = Ballot (0, pid),
-    acceptNum = Ballot (0, 0),
-    acceptVal = Nothing,
-    -- leader    =
-    ident     = pid, 
-    dir       = d,
-    ackM      = ([], 0),
-    acceptedM = 0
+  ProcessState {
+    _ident = pid,
+    _dir = d,
+    _pState = ProposerState {
+      _pBallotNum = bNum,
+      _pAcceptNum = aNum,
+      _pAcceptVal = aVal,
+      _ackM       = ([], 0),
+      _acceptedM  = 0
+    },
+    _aState = AcceptorState {
+      _aBallotNum = bNum,
+      _aAcceptNum = aNum,
+      _aAcceptVal = aVal
+    }
   }
+  where
+    bNum = Ballot (0, pid)
+    aNum = Ballot (0, 0)
+    aVal = Nothing
 
 broadcastP :: Message -> PaxosInstance ()
 broadcastP m = do
-  s <- get
-  lift $ D.broadcast (dir s) m
+  d <- use dir
+  lift $ D.broadcast d m
 
 sendP :: D.Pid -> Message -> PaxosInstance ()
 sendP p m = do
-  s <- get
-  lift $ D.send (dir s) p m
+  d <- use dir
+  lift $ D.send (d) p m
 
 propose :: PaxosInstance ()
 propose = do
-  s <- get
-  if ident s == 1 then do
-    let Ballot (prev, _) = ballotNum s
-    let new = Ballot (prev + 1, ident s)
-    put (s {ballotNum = new})
+  i <- use ident
+  if i == 1 then do
+    Ballot (prev, _) <- use $ pState . pBallotNum
+    let new = Ballot (prev + 1, i)
+    pState . pBallotNum .= new
     broadcastP $ Prepare new
   else
     return ()
@@ -61,16 +87,16 @@ maxAck acks = let Ack a b v = maximumBy (\(Ack _ a _ ) (Ack _ b _) -> compare a 
 
 acceptor :: Message -> PaxosInstance ()
 acceptor msg = do
-    s <- get
+    s <- use aState
     case msg of
-      Prepare bn | bn >= ballotNum s -> do
-        put $ s {ballotNum = bn}
-        broadcastP $ Ack bn (acceptNum s) (acceptVal s)
-      Accept b v | b >= ballotNum s -> do -- Fix maybe code here
+      Prepare bn | bn >= (view aBallotNum s) -> do
+        aState . aBallotNum .= bn
+        broadcastP $ Ack bn (view aAcceptNum s) (view aAcceptVal s)
+      Accept b v | b >= view aBallotNum s -> do -- Fix maybe code here
         -- ensure we dont send accept message multiple times
-        if (acceptNum s) /= b then do
-          put $ s {acceptNum = b, acceptVal = v}
-          new <- get
+        if (view aAcceptNum s) /= b then do
+          aState . aAcceptNum .= b
+          aState . aAcceptVal .= v
           broadcastP $ Accept b v
         else return ()
       Decide v -> return () -- placeholder
@@ -78,26 +104,29 @@ acceptor msg = do
 
 proposer :: String -> Message -> PaxosInstance ()
 proposer value msg = do
-    s <- get
+    s <- use pState
     case msg of
-      Ack bn b v | bn == ballotNum s -> do
-        let (oldL, oldC) = ackM s
+      Ack bn b v | bn == s^.pBallotNum -> do
+        let (oldL, oldC) = s^.ackM
         let newL = msg : oldL
         let newC = oldC + 1
-        if newC > div (M.size (dir s)) 2 && acceptNum s /= bn
+        d <- use dir
+        if newC > div (M.size d) 2 && s^.pAcceptNum /= bn
           then do
             let new = if all (\(Ack bal b v) -> isNothing v) newL 
                         then Just value
                         else maxAck newL
-            put $ s { acceptVal = new, acceptNum = bn }
-            broadcastP $ Accept (ballotNum s) new
-          else put $ s {ackM = (newL, newC)} -- clean up acceptM
+            pState . pAcceptVal .= new
+            pState . pAcceptNum .= bn
+            broadcastP $ Accept (s^.pBallotNum) new
+          else pState . ackM .= (newL, newC) -- clean up acceptM
       Accept b v -> do
-        let new = acceptedM s + 1
-        put $ s {acceptedM = new}
-        if new == M.size (dir s) - 1 -- TODO: one failure
+        let new = s^.acceptedM + 1
+        pState . acceptedM .= new
+        d <- use dir
+        if new == M.size d - 1 -- TODO: one failure
           then case v of
-            Just v' -> lift $ putStrLn $ show (ident s) ++ " accepted " ++ show v'
+            Just v' -> lift $ putStrLn $ "Accepted " ++ show v'
             Nothing -> return ()
         else return ()
       _ -> return ()
