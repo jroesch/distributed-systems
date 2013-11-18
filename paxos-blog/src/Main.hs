@@ -47,11 +47,11 @@ main = setupLogging $ do
 runPaxos :: Directory -> Int -> String -> IO ()
 runPaxos dir pid entry = do
   let state = initialState dir pid
-  sp <- execStateT propose state
-  loop sp state
-  where
-    loop ps as = do
-      msg <- receive (plookup dir pid)
-      ps' <- execStateT (proposer entry msg) ps
-      as' <- execStateT (acceptor msg) as
-      loop ps' as'
+  execStateT (do
+    propose
+    forever $ do
+      msg <- lift $ receive (plookup dir pid)
+      proposer entry msg
+      acceptor msg
+    ) state
+  return ()
