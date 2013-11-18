@@ -85,24 +85,26 @@ propose = do
 maxAck :: [Message] -> Value -- bad assumptions here, that all message will match this pattern
 maxAck acks = let Ack a b v = maximumBy (\(Ack _ a _ ) (Ack _ b _) -> compare a b) acks in v
 
-acceptor :: Message -> PaxosInstance ()
+acceptor :: Message -> PaxosInstance Value 
 acceptor msg = do
     s <- use aState
     case msg of
       Prepare bn | bn >= (view aBallotNum s) -> do
         aState . aBallotNum .= bn
         broadcastP $ Ack bn (view aAcceptNum s) (view aAcceptVal s)
+        return Nothing
       Accept b v | b >= view aBallotNum s -> do -- Fix maybe code here
         -- ensure we dont send accept message multiple times
         if (view aAcceptNum s) /= b then do
           aState . aAcceptNum .= b
           aState . aAcceptVal .= v
           broadcastP $ Accept b v
-        else return ()
-      Decide v -> return () -- placeholder
-      otherwise -> return ()
+          return Nothing
+        else return Nothing
+      Decide v -> return v
+      otherwise -> return Nothing
 
-proposer :: String -> Message -> PaxosInstance ()
+proposer :: String -> Message -> PaxosInstance Value
 proposer value msg = do
     s <- use pState
     case msg of
@@ -119,27 +121,15 @@ proposer value msg = do
             pState . pAcceptVal .= new
             pState . pAcceptNum .= bn
             broadcastP $ Accept (s^.pBallotNum) new
-          else pState . ackM .= (newL, newC) -- clean up acceptM
+            return Nothing
+          else do
+            pState . ackM .= (newL, newC) -- clean up acceptM
+            return Nothing
       Accept b v -> do
         let new = s^.acceptedM + 1
         pState . acceptedM .= new
         d <- use dir
         if new == M.size d - 1 -- TODO: one failure
-          then case v of
-            Just v' -> lift $ putStrLn $ "Accepted " ++ show v'
-            Nothing -> return ()
-        else return ()
-      _ -> return ()
-
-{- proposer' = do
-  s <- get
-  if leader 
-    then $ do
-       modify s ballotNum + 1
-       broadcast ballotNum + 1
-       receive Ack from Majority
-       if map (== _|_) then myVal = initV
-       else myVal = recvVal max ballot
-       broadcast "accept" bn myVAl
-       broadcast "decide" v
-    else $ return () -} 
+          then return v
+        else return Nothing
+      _ -> return Nothing

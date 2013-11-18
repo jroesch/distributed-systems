@@ -41,17 +41,23 @@ main :: IO ()
 main = setupLogging $ do
   directory <- mkDirectory [1..5]
   let state = initialState directory
-  forM [1..5] (\i -> forkIO $ runPaxos directory i "hi")
+  forM [1..5] (\i -> forkIO $ runPaxos directory i "hi" >>= print)
   runConsole
 
-runPaxos :: Directory -> Int -> String -> IO ()
+runPaxos :: Directory -> Int -> String -> IO Entry
 runPaxos dir pid entry = do
   let state = initialState dir pid
-  execStateT (do
+  evalStateT (do
     propose
-    forever $ do
-      msg <- lift $ receive (plookup dir pid)
-      proposer entry msg
-      acceptor msg
+    loop
     ) state
-  return ()
+  where
+    loop = do
+      msg <- lift $ receive (plookup dir pid)
+      mp <- proposer entry msg
+      ap <- acceptor msg
+      case mp of
+        Just v -> return v
+        Nothing -> case ap of
+          Just v -> return v
+          Nothing -> loop
