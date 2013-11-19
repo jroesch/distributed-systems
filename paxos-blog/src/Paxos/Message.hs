@@ -1,6 +1,7 @@
 module Paxos.Message where
 
-type Value = Maybe String
+type Entry = String
+type Value = Maybe Entry
 
 newtype Ballot = Ballot (Int, Int) deriving (Show, Eq)
 

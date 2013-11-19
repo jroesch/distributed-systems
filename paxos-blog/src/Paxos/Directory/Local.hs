@@ -39,12 +39,13 @@ plookup dir pid = case pid `M.lookup` dir of
 send :: Directory -> Pid -> Message -> IO ()
 send dir pid msg = 
   let p @ (Process _ chan) = plookup dir pid in
-    debugIO title (show p) $ C.writeChan chan msg
+    debugIO title ("sending " ++ (show msg) ++ " to " ++ (show p)) $ C.writeChan chan msg
   where title = "paxos.message.send"
 
 receive :: Process -> IO Message
-receive p @ (Process _ chan) = debugIO title (show p) $ C.readChan chan
-  where title = "paxos.message.receive"
+-- receive p @ (Process _ chan) = debugIO title ("recieving " ++ (show p)) $ C.readChan chan
+--   where title = "paxos.message.receive"
+receive p @ (Process _ chan) = C.readChan chan
 
 broadcast :: Directory -> Message -> IO ()
 broadcast d m = mapM_ (\p -> send d p m)  $ M.keys d
