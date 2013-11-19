@@ -1,13 +1,16 @@
 {-# LANGUAGE DeriveGeneric, DefaultSignatures, BangPatterns, GADTs, EmptyDataDecls, OverloadedStrings #-}
 module Paxos.Remote.Channel (
-   Chan,
+   Chan, ReadMode, WriteMode,
+   ChannelRegistry,
    newChan,
    writeChan,
    readChan,
    openReadChan,
    openWriteChan,
    channelRegistry,
-   startChannelService
+   startChannelService,
+   hRead,
+   hWrite
   ) where
 
 import Control.Concurrent (forkIO)
@@ -30,8 +33,6 @@ import GHC.Generics
 import Network
 import System.Log.Logger
 import Debug.Trace
-
-type Message = String
 
 -- | Channel type with two GADT constructors representing locality of
 -- channels.
@@ -93,15 +94,14 @@ openWriteChan h p slot = WriteChan <$> connectToProcess h p (OpenChan slot)
 -- a channel.
 startChannelService :: (Serialize a) => ChannelRegistry a -> IO ()
 startChannelService reg = do
-  socket <- trace "listening" $ listenOn $ PortNumber 9000
+  socket <- listenOn $ PortNumber 9000
   forever $ do
-    (handle, hname, port) <- trace "accepting on socket" $ accept socket
+    (handle, hname, port) <- accept socket
     forkIO $ execE $ do
-      msg <- trace "reading data" $ lift $ hRead handle
+      msg <- lift $ hRead handle
       chan <- lift $ case msg of
         OpenChan slot -> lookupChannel reg slot
         NewChan -> do
-          putStrLn "Here Dog"
           (slot, chan) <- allocateChannel reg
           hWrite handle slot
           return chan
@@ -113,7 +113,7 @@ startChannelService reg = do
 -- mode.
 connectToProcess :: String -> Int -> ChannelMode -> IO Connection -- fix portnumber buissness
 connectToProcess host port mode = do 
-  handle <- trace "connecting to Process" $ connectTo host (PortNumber $ fromIntegral port) -- open
+  handle <- connectTo host (PortNumber $ fromIntegral port) -- open
   hWrite handle mode
   slot <- hRead handle
   return $ Connection (ConnectionInfo host (fromIntegral port) slot) handle -- hardcoded slot number
@@ -136,9 +136,7 @@ allocateChannel mvar = do
     (ChannelData (e:es) array) -> do
       let cvar = array ! e
       chan <- C.newChan
-      putStrLn "putting Var"
       putMVar cvar chan
-      putStrLn "Unputting Var"
       putMVar mvar (ChannelData es array)
       return (e, chan)
 

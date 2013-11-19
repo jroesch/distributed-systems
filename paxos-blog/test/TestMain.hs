@@ -28,11 +28,9 @@ test_singleRemoteChannel = do
     mreg <- channelRegistry :: IO (ChannelRegistry String)
     tid <- forkIO $ startChannelService mreg
     wChan <- (newChan "localhost" 9000) :: IO (Chan String WriteMode)
-    rChan <- openReadChan mreg (find_slot wChan)
+    rChan <- openReadChan mreg 0
     writeChan wChan "foo"
     msg <- readChan rChan
     killThread tid
     msg @=? "foo"
-  where 
-    find_slot (WriteChan (Connection (ConnectionInfo _ _ slot) _)) = slot
 
