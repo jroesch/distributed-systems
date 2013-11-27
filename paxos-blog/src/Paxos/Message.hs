@@ -11,9 +11,10 @@ instance Ord Ballot where
       EQ -> compare b d
       o  -> o
 
-data Message = Prepare Ballot 
-             | Ack Ballot Ballot Value 
-             | Accept Ballot Value 
-             | Decide Value
-             deriving (Show, Eq)
+data InstanceMessage = Prepare Ballot 
+                       | Ack Ballot Ballot Value 
+                       | Accept Ballot Value 
+                       | Decide Value
+                       deriving (Show, Eq)
 
+data Message = Message Int InstanceMessage deriving (Show)

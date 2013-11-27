@@ -13,6 +13,7 @@ import qualified Paxos.Directory as D
 
 data ProcessState = ProcessState {
     _ident  :: Int
+  , _inst   :: Int
   , _dir    :: D.Directory
   , _pState :: ProposerState
   , _aState :: AcceptorState
@@ -22,7 +23,7 @@ data ProposerState = ProposerState {
     _pBallotNum :: Ballot
   , _pAcceptNum :: Ballot
   , _pAcceptVal :: Value
-  , _ackM      :: ([Message], Int) -- clean this up
+  , _ackM      :: ([InstanceMessage], Int) -- clean this up
   , _acceptedM :: Int -- clean this up
   } deriving (Show)
 
@@ -38,10 +39,11 @@ makeLenses ''ProcessState
 
 type PaxosInstance a = StateT ProcessState IO a
 
-initialState :: D.Directory -> D.Pid -> ProcessState
-initialState d pid = 
+initialState :: D.Directory -> D.Pid -> Int -> ProcessState
+initialState d pid inst = 
   ProcessState {
     _ident = pid,
+    _inst = inst,
     _dir = d,
     _pState = ProposerState {
       _pBallotNum = bNum,
@@ -61,15 +63,17 @@ initialState d pid =
     aNum = Ballot (0, 0)
     aVal = Nothing
 
-broadcastP :: Message -> PaxosInstance ()
+broadcastP :: InstanceMessage -> PaxosInstance ()
 broadcastP m = do
   d <- use dir
-  lift $ D.broadcast d m
+  i <- use inst
+  lift $ D.broadcast d (Message i m)
 
-sendP :: D.Pid -> Message -> PaxosInstance ()
+sendP :: D.Pid -> InstanceMessage -> PaxosInstance ()
 sendP p m = do
   d <- use dir
-  lift $ D.send (d) p m
+  i <- use inst
+  lift $ D.send (d) p (Message i m)
 
 propose :: PaxosInstance ()
 propose = do
@@ -82,10 +86,10 @@ propose = do
   else
     return ()
 
-maxAck :: [Message] -> Value -- bad assumptions here, that all message will match this pattern
+maxAck :: [InstanceMessage] -> Value -- bad assumptions here, that all message will match this pattern
 maxAck acks = let Ack a b v = maximumBy (\(Ack _ a _ ) (Ack _ b _) -> compare a b) acks in v
 
-acceptor :: Message -> PaxosInstance Value 
+acceptor :: InstanceMessage -> PaxosInstance Value 
 acceptor msg = do
     s <- use aState
     case msg of
@@ -104,7 +108,7 @@ acceptor msg = do
       Decide v -> return v
       otherwise -> return Nothing
 
-proposer :: String -> Message -> PaxosInstance Value
+proposer :: String -> InstanceMessage -> PaxosInstance Value
 proposer value msg = do
     s <- use pState
     case msg of
