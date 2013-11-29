@@ -7,6 +7,7 @@ import Control.Monad.State
 import Control.Monad
 import Control.Concurrent.Chan
 import qualified Data.Map as M
+import Data.Sequence
 -- Paxos Imports
 import System.Console.Haskeline
 import Paxos
@@ -42,7 +43,8 @@ main :: IO ()
 main = setupLogging $ do
   directory <- mkDirectory [1..5]
   let state = initialState directory
-  chans <- forM [1..5] (\i -> runPaxos directory i)
+  list <- newMVar empty
+  chans <- forM [1..5] (\i -> runPaxos directory i list)
   c <- dupChan $ chans !! 1
   proposeValue c directory 1 "hi"
   runConsole
@@ -57,31 +59,32 @@ proposeValue chan dir pid entry = do
   where
     loop = do
       Message i msg <- lift $ readChan chan
-      lift $ putStrLn $ "also got " ++ show msg
       if i == 0 then do
         proposer entry msg
         loop
       else loop
 
-runPaxos :: Directory -> Int -> IO (Chan Message)
-runPaxos dir pid = do
+runPaxos :: Directory -> Int -> MVar (Seq Entry) -> IO (Chan Message)
+runPaxos dir pid mvar = do
   c <- newChan -- all messages will be sent through this channel
   forkIO $ forever $ do
     msg <- receive (plookup dir pid)
-    putStrLn $ "got " ++ show msg
     writeChan c msg
-  forkIO $ runAcceptors c dir pid
+  forkIO $ runAcceptors c dir pid mvar
   return c
 
-runAcceptors :: Chan Message -> Directory -> Int -> IO ()
-runAcceptors chan dir pid = do
+runAcceptors :: Chan Message -> Directory -> Int -> MVar (Seq Entry) -> IO ()
+runAcceptors chan dir pid mvar = do
   loop $ [initialState dir pid i | i <- [0..]]
   where
     loop a = do
       Message i msg <- readChan chan
-      print msg
       let inst = a !! i
-      s <- execStateT (acceptor msg) $ a !! i
+      (o, s) <- runStateT (acceptor msg) $ a !! i
+      case o of
+        Just v -> do
+          modifyMVar_ mvar (\var -> return $ var |> v)
+        Nothing -> return ()
       loop $ replaceAtIndex i s a
-    replaceAtIndex n item ls = a ++ (item:b) where (a, (_:b)) = splitAt n ls
+    replaceAtIndex n item ls = a ++ (item:b) where (a, (_:b)) = Prelude.splitAt n ls
 

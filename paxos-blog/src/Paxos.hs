@@ -101,14 +101,14 @@ acceptor msg = do
         -- ensure we dont send accept message multiple times
         if (view aAcceptNum s) /= b then do
           aState . aAcceptNum .= b
-          aState . aAcceptVal .= v
+          aState . aAcceptVal .= Just v
           broadcastP $ Accept b v
           return Nothing
         else return Nothing
-      Decide v -> return v
+      Decide v -> return $ Just v
       otherwise -> return Nothing
 
-proposer :: String -> InstanceMessage -> PaxosInstance Value
+proposer :: String -> InstanceMessage -> PaxosInstance ()
 proposer value msg = do
     s <- use pState
     case msg of
@@ -120,20 +120,18 @@ proposer value msg = do
         if newC > div (M.size d) 2 && s^.pAcceptNum /= bn
           then do
             let new = if all (\(Ack bal b v) -> isNothing v) newL 
-                        then Just value
-                        else maxAck newL
-            pState . pAcceptVal .= new
+                        then value
+                        else fromJust $ maxAck newL
+            pState . pAcceptVal .= Just new
             pState . pAcceptNum .= bn
             broadcastP $ Accept (s^.pBallotNum) new
-            return Nothing
           else do
             pState . ackM .= (newL, newC) -- clean up acceptM
-            return Nothing
       Accept b v -> do
         let new = s^.acceptedM + 1
         pState . acceptedM .= new
         d <- use dir
         if new == M.size d - 1 -- TODO: one failure
-          then return v
-        else return Nothing
-      _ -> return Nothing
+          then broadcastP $ Decide v
+        else return ()
+      _ -> return ()

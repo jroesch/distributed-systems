@@ -13,8 +13,8 @@ instance Ord Ballot where
 
 data InstanceMessage = Prepare Ballot 
                        | Ack Ballot Ballot Value 
-                       | Accept Ballot Value 
-                       | Decide Value
+                       | Accept Ballot Entry 
+                       | Decide Entry
                        deriving (Show, Eq)
 
 data Message = Message Int InstanceMessage deriving (Show)
