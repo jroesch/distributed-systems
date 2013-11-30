@@ -25,10 +25,13 @@ test_hRead_hWrite_Id = do
   "foo" @=? str
 
 test_singleRemoteChannel = do
+    putStrLn "running"
     mreg <- channelRegistry :: IO (ChannelRegistry String)
-    tid <- forkIO $ startChannelService mreg
-    wChan <- (newChan "localhost" 9000) :: IO (Chan String WriteMode)
-    rChan <- openReadChan mreg 0
+    ochan <- newEmptyMVar
+    tid <- forkIO $ startChannelService mreg (\c -> putMVar ochan c)
+    wChan <- (newChan "localhost" 9000) :: IO (Chan String)
+    rChan <- takeMVar ochan
+    putStrLn "before write"
     writeChan wChan "foo"
     msg <- readChan rChan
     killThread tid
