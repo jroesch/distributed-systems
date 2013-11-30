@@ -2,3 +2,4 @@ TODO
 ----
 
 1. Bringing old replicas up to speed
+2. Repropose values after timeout

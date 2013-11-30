@@ -19,15 +19,22 @@ import System.Log.Logger
 import System.Log.Handler.Simple
 
 
-runConsole :: IO ()
-runConsole = runInputT defaultSettings loop
+runConsole :: Chan Message -> MVar (Seq Entry) -> MVar Int -> Directory -> Int -> IO ()
+runConsole chan var instVar dir pid = runInputT defaultSettings loop
     where loop = do
-            minput <- getInputLine ""
+            minput <- getInputLine "> "
             case minput of
               Nothing     -> return ()
               Just "exit" -> return ()
               Just input  -> do
-                outputStrLn $ "Echo: " ++ input
+                case input of
+                  'p':'o':'s':'t':' ':rest -> do
+                    c <- lift $ dupChan chan
+                    lift $ forkIO $ proposeValue c instVar dir pid rest
+                    return ()
+                  "read" -> lift $ readMVar var >>= print
+                  "fail" -> return ()
+                  "unfail" -> return ()
                 loop
 
 setupLogging :: IO a -> IO ()
@@ -44,25 +51,29 @@ main = setupLogging $ do
   directory <- mkDirectory [1..5]
   let state = initialState directory
   list <- newMVar empty
+  inst <- newMVar 0
   chans <- forM [1..5] (\i -> runPaxos directory i list)
-  c <- dupChan $ chans !! 1
-  proposeValue c directory 1 "hi"
-  runConsole
+  runConsole (chans !! 1) list inst directory 1
 
-proposeValue :: Chan Message -> Directory -> Int -> String -> IO ()
-proposeValue chan dir pid entry = do
+getInst :: MVar Int -> IO Int
+getInst mvar = modifyMVar mvar (\v -> return (v + 1, v))
+
+proposeValue :: Chan Message -> MVar Int -> Directory -> Int -> String -> IO ()
+proposeValue chan instVar dir pid entry = do
+  inst <- getInst instVar
   evalStateT (do
     propose
-    loop
-    ) $ initialState dir pid 0 -- TODO: select correct instance
+    loop inst
+    ) $ initialState dir pid inst -- TODO: select correct instance
   return ()
   where
-    loop = do
+    loop inst = do
       Message i msg <- lift $ readChan chan
-      if i == 0 then do
+      -- only read our instance methods
+      if i == inst then do
         proposer entry msg
-        loop
-      else loop
+        loop inst
+      else loop inst
 
 runPaxos :: Directory -> Int -> MVar (Seq Entry) -> IO (Chan Message)
 runPaxos dir pid mvar = do
@@ -83,7 +94,9 @@ runAcceptors chan dir pid mvar = do
       (o, s) <- runStateT (acceptor msg) $ a !! i
       case o of
         Just v -> do
-          modifyMVar_ mvar (\var -> return $ var |> v)
+          if pid == 1 then
+            modifyMVar_ mvar (\var -> return $ var |> v)
+          else return ()
         Nothing -> return ()
       loop $ replaceAtIndex i s a
     replaceAtIndex n item ls = a ++ (item:b) where (a, (_:b)) = Prelude.splitAt n ls
