@@ -19,8 +19,8 @@ import System.Log.Logger
 import System.Log.Handler.Simple
 
 
-runConsole :: Chan Message -> MVar (Seq Entry) -> MVar Int -> Directory -> Int -> IO ()
-runConsole chan var instVar dir pid = runInputT defaultSettings loop
+runConsole :: Chan Message -> MVar (Seq Entry) -> MVar Int -> MVar Bool -> Directory -> Int -> IO ()
+runConsole chan var instVar fail dir pid = runInputT defaultSettings loop
     where loop = do
             minput <- getInputLine "> "
             case minput of
@@ -33,8 +33,8 @@ runConsole chan var instVar dir pid = runInputT defaultSettings loop
                     lift $ forkIO $ proposeValue c instVar dir pid rest
                     return ()
                   "read" -> lift $ readMVar var >>= print
-                  "fail" -> return ()
-                  "unfail" -> return ()
+                  "fail" -> lift $ modifyMVar_ fail (\_ -> return True)
+                  "unfail" -> lift $ modifyMVar_ fail (\_ -> return False)
                 loop
 
 setupLogging :: IO a -> IO ()
@@ -52,8 +52,9 @@ main = setupLogging $ do
   let state = initialState directory
   list <- newMVar empty
   inst <- newMVar 0
-  chans <- forM [1..5] (\i -> runPaxos directory i list)
-  runConsole (chans !! 1) list inst directory 1
+  fail <- newMVar False
+  chans <- forM [1..5] (\i -> runPaxos directory i list fail)
+  runConsole (chans !! 1) list inst fail directory 1
 
 getInst :: MVar Int -> IO Int
 getInst mvar = modifyMVar mvar (\v -> return (v + 1, v))
@@ -75,12 +76,15 @@ proposeValue chan instVar dir pid entry = do
         loop inst
       else loop inst
 
-runPaxos :: Directory -> Int -> MVar (Seq Entry) -> IO (Chan Message)
-runPaxos dir pid mvar = do
+runPaxos :: Directory -> Int -> MVar (Seq Entry) -> MVar Bool -> IO (Chan Message)
+runPaxos dir pid mvar fail = do
   c <- newChan -- all messages will be sent through this channel
   forkIO $ forever $ do
     msg <- receive (plookup dir pid)
-    writeChan c msg
+    b <- readMVar fail
+    case b of
+      False -> writeChan c msg
+      True -> return ()
   forkIO $ runAcceptors c dir pid mvar
   return c
 
