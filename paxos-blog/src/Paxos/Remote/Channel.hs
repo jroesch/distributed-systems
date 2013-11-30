@@ -1,12 +1,10 @@
-{-# LANGUAGE DeriveGeneric, DefaultSignatures, BangPatterns, GADTs, EmptyDataDecls, OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric, DefaultSignatures, BangPatterns, GADTs, EmptyDataDecls, OverloadedStrings, ScopedTypeVariables #-}
 module Paxos.Remote.Channel (
-   Chan, ReadMode, WriteMode,
+   Chan,
    ChannelRegistry,
    newChan,
    writeChan,
    readChan,
-   openReadChan,
-   openWriteChan,
    channelRegistry,
    startChannelService,
    hRead,
@@ -36,22 +34,16 @@ import Debug.Trace
 
 -- | Channel type with two GADT constructors representing locality of
 -- channels.
-data Chan a t where
-    WriteChan :: Connection -> Chan a WriteMode
-    ReadChan  :: (C.Chan a) -> Chan a ReadMode
-
--- | Phantom type for Chan
-data ReadMode
-
--- | Phatom type for Chan
-data WriteMode
+data Chan a where
+    MkChan :: Connection -> (C.Chan a) -> Chan a
 
 -- | Message type for opening a channel.
-data ChannelMode = NewChan
-                 | OpenChan !Int
+data ChannelOp a = New
+                 | Write a
+                 | Close
                  deriving (Show, Eq, Generic)
 
-instance Serialize ChannelMode
+instance Serialize a => Serialize (ChannelOp a)
 
 -- | Represents a connection to a remote channel.
 data Connection = Connection !ConnectionInfo !Handle deriving (Eq, Show)
@@ -75,48 +67,58 @@ type ChannelRegistry a = (MVar (ChannelData a))
 -- | Channel data that keeps track of free slots, and an array of channels.
 data ChannelData a = ChannelData ![Int] (A.Array Int (MVar (C.Chan a)))
 
-newChan :: (Serialize a) => String -> Int -> IO (Chan a WriteMode)
-newChan h p = WriteChan <$> connectToProcess h p NewChan
+newChan :: (Serialize a) => String -> Int -> IO (Chan a)
+newChan h p = connectToProcess h p New
 
-writeChan :: (Serialize a) => Chan a WriteMode -> a -> IO ()
-writeChan (WriteChan (Connection _ handle)) v = hWrite handle v
+writeChan :: (Serialize a) => Chan a -> a -> IO ()
+writeChan (MkChan (Connection _ handle) _) v = hWrite handle (Write v)
 
-readChan :: (Serialize a) => Chan a ReadMode -> IO a
-readChan (ReadChan c) = C.readChan c
+readChan :: (Serialize a) => Chan a -> IO a
+readChan (MkChan _ chan) = C.readChan chan
 
-openReadChan :: (Serialize a) => (MVar (ChannelData a)) -> Int -> IO (Chan a ReadMode)
-openReadChan ref slot = ReadChan <$> lookupChannel ref slot
-
-openWriteChan :: (Serialize a) => String -> Int -> Int -> IO (Chan a WriteMode)
-openWriteChan h p slot = WriteChan <$> connectToProcess h p (OpenChan slot)
+-- closeChan :: IO (Chan a WriteMode) -> IO ()
+-- closeChan (WriteChan (Connection _ handle)) = hClose handle
 
 -- | Start the channel service which allows remote processes to open
 -- a channel.
-startChannelService :: (Serialize a) => ChannelRegistry a -> IO ()
-startChannelService reg = do
+startChannelService :: forall a. (Serialize a, Show a) => ChannelRegistry a -> (Chan a -> IO ()) -> IO ()
+startChannelService reg handler = do
   socket <- listenOn $ PortNumber 9000
   forever $ do
     (handle, hname, port) <- accept socket
-    forkIO $ execE $ do
-      msg <- lift $ hRead handle
-      chan <- lift $ case msg of
-        OpenChan slot -> lookupChannel reg slot
-        NewChan -> do
+    forkIO $ do
+      new :: (ChannelOp a) <- hRead handle      
+      case new of
+        New -> do
           (slot, chan) <- allocateChannel reg
           hWrite handle slot
-          return chan
-      lift $ forever $ do
-        msg <- hRead handle
-        C.writeChan chan msg
-
+          putStrLn "Opened new Channel"
+          let info = ConnectionInfo hname port slot
+              ch = MkChan (Connection info handle) chan -- build our chan
+          handler ch -- pass to handler
+          forever $ do -- loop reading values from handle and writing to channel
+            msg <- hRead handle
+            case msg of
+              Write v -> C.writeChan chan v
+              Close -> freeChannel reg slot
+              x@_ -> error $ show x
+        _ -> error "not sure what to do here"
+    
 -- | Connect to remote process given hostname and port number and channel
 -- mode.
-connectToProcess :: String -> Int -> ChannelMode -> IO Connection -- fix portnumber buissness
+connectToProcess :: (Serialize a) => String -> Int -> ChannelOp a -> IO (Chan a) -- fix portnumber buissness
 connectToProcess host port mode = do 
   handle <- connectTo host (PortNumber $ fromIntegral port) -- open
   hWrite handle mode
   slot <- hRead handle
-  return $ Connection (ConnectionInfo host (fromIntegral port) slot) handle -- hardcoded slot number
+  let conn = Connection (ConnectionInfo host (fromIntegral port) slot) handle
+  chan <- C.newChan -- loop here and add messages to queue
+  forkIO $ forever $ do
+    write <- hRead handle
+    case write of
+      Write v -> C.writeChan chan v
+      _       -> error "programmer error"
+  return $ MkChan conn chan
 
 -- | A registry for open channels.
 channelRegistry :: IO (ChannelRegistry a)
@@ -143,9 +145,10 @@ allocateChannel mvar = do
 -- | Lookup a channel based on its channel descriptor.
 lookupChannel :: ChannelRegistry a -> Int -> IO (C.Chan a)
 lookupChannel mvar e = do
-  (ChannelData _ array) <- takeMVar mvar
+  cr @ (ChannelData _ array) <- readMVar mvar
   let cvar = array ! e
-  readMVar cvar
+  chan <- readMVar cvar
+  return chan
 
 -- | Free a channel from the channel registry.
 freeChannel :: ChannelRegistry a -> Int -> IO ()
