@@ -12,19 +12,20 @@ import Paxos.Message
 import qualified Paxos.Directory as D
 
 data ProcessState = ProcessState {
-    _ident  :: Int
-  , _inst   :: Int
-  , _dir    :: D.Directory
-  , _pState :: ProposerState
-  , _aState :: AcceptorState
+    _ident   :: Int
+  , _inst    :: Int
+  , _decided :: Value
+  , _dir     :: D.Directory
+  , _pState  :: ProposerState
+  , _aState  :: AcceptorState
   } deriving (Show)
 
 data ProposerState = ProposerState {
     _pBallotNum :: Ballot
   , _pAcceptNum :: Ballot
   , _pAcceptVal :: Value
-  , _ackM      :: ([InstanceMessage], Int) -- clean this up
-  , _acceptedM :: Int -- clean this up
+  , _ackM       :: ([InstanceMessage], Int) -- clean this up
+  , _acceptedM  :: Int -- clean this up
   } deriving (Show)
 
 data AcceptorState = AcceptorState {
@@ -42,10 +43,11 @@ type PaxosInstance a = StateT ProcessState IO a
 initialState :: D.Directory -> D.Pid -> Int -> ProcessState
 initialState d pid inst = 
   ProcessState {
-    _ident = pid,
-    _inst = inst,
-    _dir = d,
-    _pState = ProposerState {
+    _ident   = pid,
+    _inst    = inst,
+    _decided = Nothing,
+    _dir     = d,
+    _pState  = ProposerState {
       _pBallotNum = bNum,
       _pAcceptNum = aNum,
       _pAcceptVal = aVal,
@@ -92,23 +94,31 @@ maxAck acks = let Ack a b v = maximumBy (\(Ack _ a _ ) (Ack _ b _) -> compare a 
 acceptor :: InstanceMessage -> PaxosInstance Value 
 acceptor msg = do
     s <- use aState
-    case msg of
-      Prepare bn | bn >= (view aBallotNum s) -> do
-        aState . aBallotNum .= bn
-        broadcastP $ Ack bn (view aAcceptNum s) (view aAcceptVal s)
+    d <- use decided
+    case d of
+      Just v -> do
+        broadcastP $ Decide v
         return Nothing
-      Accept b v | b >= view aBallotNum s -> do -- Fix maybe code here
-        -- ensure we dont send accept message multiple times
-        if (view aAcceptNum s) /= b then do
-          aState . aAcceptNum .= b
-          aState . aAcceptVal .= Just v
-          broadcastP $ Accept b v
-          return Nothing
-        else return Nothing
-      Decide v -> return $ Just v
-      otherwise -> return Nothing
+      Nothing -> do
+        case msg of
+          Prepare bn | bn >= (view aBallotNum s) -> do
+            aState . aBallotNum .= bn
+            broadcastP $ Ack bn (view aAcceptNum s) (view aAcceptVal s)
+            return Nothing
+          Accept b v | b >= view aBallotNum s -> do -- Fix maybe code here
+            -- ensure we dont send accept message multiple times
+            if (view aAcceptNum s) /= b then do
+              aState . aAcceptNum .= b
+              aState . aAcceptVal .= Just v
+              broadcastP $ Accept b v
+              return Nothing
+            else return Nothing
+          Decide v -> do
+            decided .= Just v
+            return $ Just v
+          _ -> return Nothing
 
-proposer :: String -> InstanceMessage -> PaxosInstance ()
+proposer :: String -> InstanceMessage -> PaxosInstance (Maybe Bool)
 proposer value msg = do
     s <- use pState
     case msg of
@@ -125,13 +135,18 @@ proposer value msg = do
             pState . pAcceptVal .= Just new
             pState . pAcceptNum .= bn
             broadcastP $ Accept (s^.pBallotNum) new
+            return Nothing
           else do
             pState . ackM .= (newL, newC) -- clean up acceptM
-      Accept b v -> do
+            return Nothing
+      Accept b v | b == s^.pBallotNum -> do
         let new = s^.acceptedM + 1
         pState . acceptedM .= new
         d <- use dir
         if new == M.size d - 1 -- TODO: one failure
-          then broadcastP $ Decide v
-        else return ()
-      _ -> return ()
+        then do
+          broadcastP $ Decide v
+          return $ Just True
+        else return Nothing
+      Decide _ -> return $ Just False
+      _ -> return Nothing

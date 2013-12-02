@@ -35,13 +35,14 @@ runConsole chan var instVar fail dir pid = runInputT defaultSettings loop
                   "read" -> lift $ readMVar var >>= print
                   "fail" -> lift $ modifyMVar_ fail (\_ -> return True)
                   "unfail" -> lift $ modifyMVar_ fail (\_ -> return False)
+                  _ -> lift $ putStrLn "invalid command"
                 loop
 
 setupLogging :: IO a -> IO ()
 setupLogging action = do
   fh <- fileHandler "log/paxos.log" DEBUG
   updateGlobalLogger rootLoggerName (addHandler fh)
-  updateGlobalLogger "paxos" (setLevel ERROR)
+  updateGlobalLogger "paxos" (setLevel DEBUG)
   debugM "paxos" "Starting up application..."
   action
   debugM "paxos" "Shutting down application..."
@@ -59,6 +60,7 @@ main = setupLogging $ do
 getInst :: MVar Int -> IO Int
 getInst mvar = modifyMVar mvar (\v -> return (v + 1, v))
 
+-- Propose a value to paxos
 proposeValue :: Chan Message -> MVar Int -> Directory -> Int -> String -> IO ()
 proposeValue chan instVar dir pid entry = do
   inst <- getInst instVar
@@ -72,8 +74,12 @@ proposeValue chan instVar dir pid entry = do
       Message i msg <- lift $ readChan chan
       -- only read our instance methods
       if i == inst then do
-        proposer entry msg
-        loop inst
+        res <- proposer entry msg -- TODO: need to update inst if we fail
+        case res of
+          Just True -> return () -- Successfully proposed
+          Just False -> do -- someone else sucessfully proposed, TODO: try another instance?
+            lift $ putStrLn "Failed to propose"
+          Nothing -> loop inst
       else loop inst
 
 runPaxos :: Directory -> Int -> MVar (Seq Entry) -> MVar Bool -> IO (Chan Message)
@@ -98,6 +104,7 @@ runAcceptors chan dir pid mvar = do
       (o, s) <- runStateT (acceptor msg) $ a !! i
       case o of
         Just v -> do
+          -- decided on value
           if pid == 1 then
             modifyMVar_ mvar (\var -> return $ var |> v)
           else return ()
