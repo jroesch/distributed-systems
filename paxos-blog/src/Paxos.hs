@@ -96,9 +96,11 @@ acceptor msg = do
     s <- use aState
     d <- use decided
     case d of
-      Just v -> do
-        broadcastP $ Decide v
-        return Nothing
+      Just v -> case msg of
+        Decide _ -> return Nothing
+        _ -> do
+          broadcastP $ Decide v
+          return Nothing
       Nothing -> do
         case msg of
           Prepare bn | bn >= (view aBallotNum s) -> do
