@@ -19,6 +19,7 @@ import Data.Functor ((<$>))
 import qualified Data.Map as M
 import Data.Serialize
 import GHC.Generics
+import System.Log.Logger
 import qualified Paxos.Remote.Channel as R
 import Paxos.Message (Message)
 
@@ -76,17 +77,18 @@ plookup mdir pid = do
       Just v  -> readMVar v
 
 send :: Directory -> Pid -> Message -> IO ()
-send dir pid msg = do
+send dir pid msg = debugIO "paxos.message.send" (show (pid, msg)) $ do
     (Process _ chan) <- plookup dir pid
     R.writeChan chan (AMessage msg)
 
 receive :: Directory -> IO Message
 receive mdir = do
     (chan, dir) <- readMVar mdir
-    c <- C.readChan chan 
-    case c of
-      AMessage m -> return m
-      APid _     -> error "fucking pid"
+    debugIO "paxos.message.receive" "receiving message" $ do
+      c <- C.readChan chan 
+      case c of
+        AMessage m -> return m
+        APid _     -> error "fucking pid"
 
 broadcast :: Directory -> Message -> IO ()
 broadcast d m = mapM_ writeMessage processes 
@@ -95,3 +97,9 @@ broadcast d m = mapM_ writeMessage processes
 
 size :: Directory -> IO Int
 size dir = readMVar dir >>= return . M.size . snd
+
+debugIO :: String -> String -> IO a -> IO a
+debugIO name msg action = do
+    r <- action
+    debugM name msg
+    return r
