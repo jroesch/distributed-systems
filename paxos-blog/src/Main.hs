@@ -67,7 +67,8 @@ proposeValue :: Chan Message -> MVar Int -> Directory -> Int -> String -> IO ()
 proposeValue chan instVar dir pid entry = do
   inst <- getInst instVar
   st <- initialState dir pid inst -- TODO: select correct instance
-  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 200
+  execStateT propose st -- initial proposal TODO: is this needed?
+  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 200 -- TODO: configurable
   evalStateT (loop inst timer) st
   return ()
   where
