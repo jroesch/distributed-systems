@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric, DefaultSignatures, BangPatterns, GADTs, EmptyDataDecls, OverloadedStrings, ScopedTypeVariables #-}
 module Paxos.Remote.Channel (
    Chan,
+   hostname, port,
    ChannelRegistry,
    newChan,
    writeChan,
@@ -51,6 +52,12 @@ data Connection = Connection !ConnectionInfo !Handle deriving (Eq, Show)
 -- | Contains the connection info and channel slot.
 data ConnectionInfo = ConnectionInfo !String !PortNumber !Int deriving (Show, Eq, Generic)
 
+hostname :: Chan a -> String
+hostname (MkChan (Connection (ConnectionInfo h _ _) _) _) = h
+
+port :: Chan a -> PortNumber
+port (MkChan (Connection (ConnectionInfo _ p _) _) _) = p
+
 instance Serialize ConnectionInfo
 
 instance Serialize PortNumber where
@@ -76,8 +83,8 @@ writeChan (MkChan (Connection _ handle) _) v = hWrite handle (Write v)
 readChan :: (Serialize a) => Chan a -> IO a
 readChan (MkChan _ chan) = C.readChan chan
 
--- closeChan :: IO (Chan a WriteMode) -> IO ()
--- closeChan (WriteChan (Connection _ handle)) = hClose handle
+closeChan :: Chan a -> IO ()
+closeChan (MkChan (Connection _ handle) _) = hClose handle
 
 -- | Start the channel service which allows remote processes to open
 -- a channel.

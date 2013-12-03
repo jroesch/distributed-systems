@@ -1,9 +1,15 @@
+{-# LANGUAGE DeriveGeneric #-}
 module Paxos.Message where
+
+import Data.Serialize
+import GHC.Generics
 
 type Entry = String
 type Value = Maybe Entry
 
-newtype Ballot = Ballot (Int, Int) deriving (Show, Eq)
+newtype Ballot = Ballot (Int, Int) deriving (Show, Eq, Generic)
+
+instance Serialize Ballot
 
 instance Ord Ballot where
   compare (Ballot (a, b)) (Ballot (c, d)) = 
@@ -12,9 +18,15 @@ instance Ord Ballot where
       o  -> o
 
 data InstanceMessage = Prepare Ballot 
-                       | Ack Ballot Ballot Value 
-                       | Accept Ballot Entry 
-                       | Decide Entry
-                       deriving (Show, Eq)
+                     | Ack Ballot Ballot Value 
+                     | Accept Ballot Entry 
+                     | Decide Entry
+                     deriving (Show, Eq, Generic)
 
-data Message = Message Int InstanceMessage deriving (Show)
+instance Serialize InstanceMessage
+
+data Message = Message Int InstanceMessage 
+             deriving (Show, Generic)
+
+instance Serialize Message
+
