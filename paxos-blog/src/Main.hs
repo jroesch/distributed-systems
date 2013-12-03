@@ -20,6 +20,7 @@ import Paxos.Remote
 import System.Log.Logger
 import System.Log.Handler.Simple
 import System.Environment
+import System.IO
 
 runConsole :: Chan Message -> MVar (Seq Entry) -> MVar Int -> MVar Bool -> Directory -> Int -> IO ()
 runConsole chan var instVar fail dir pid = runInputT defaultSettings loop
@@ -49,16 +50,24 @@ setupLogging action = do
   action
   debugM "paxos" "Shutting down application..."
 
+configFromFile :: IO [(Int, String, Int)]
+configFromFile = do
+    contents <- readFile "paxos.config"
+    return $ read contents
+
 main :: IO ()
 main = setupLogging $ do
   args <- getArgs
-  directory <- mkDirectory (read $ args !! 0 :: Int) (read $ args !! 1 :: Int)  [(1, "localhost", 9000), (2, "localhost", 9001), (3, "localhost", 9002)]
+  let port = (read $ args !! 0 :: Int)
+      pid  = (read $ args !! 1 :: Int)
+  config <- configFromFile
+  directory <- mkDirectory port pid config
   let state = initialState directory
   list <- newMVar empty
   inst <- newMVar 0
   fail <- newMVar False
-  chan <- runPaxos directory (read $ args !! 1 :: Int) list fail
-  runConsole chan list inst fail directory (read $ args !! 1 :: Int)
+  chan <- runPaxos directory pid list fail
+  runConsole chan list inst fail directory pid
 
 getInst :: MVar Int -> IO Int
 getInst mvar = modifyMVar mvar (\v -> return (v + 1, v))
