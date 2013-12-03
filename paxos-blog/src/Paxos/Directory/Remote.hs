@@ -91,9 +91,12 @@ receive mdir = do
         APid _     -> error "fucking pid"
 
 broadcast :: Directory -> Message -> IO ()
-broadcast d m = mapM_ writeMessage processes 
-  where processes = undefined -- map snd $ M.toList d what to do here?
-        writeMessage (Process _ chan) = R.writeChan chan $ AMessage m
+broadcast d m = do
+    (_, dir) <- readMVar d
+    ps <- mapM readMVar $ M.elems dir
+    forM_ ps $
+      \(Process _ chan) -> R.writeChan chan $ AMessage m
+
 
 size :: Directory -> IO Int
 size dir = readMVar dir >>= return . M.size . snd
