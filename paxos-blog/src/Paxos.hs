@@ -82,14 +82,11 @@ sendP p m = do
 propose :: PaxosInstance ()
 propose = do
   i <- use ident
-  if i == 1 then do
-    var <- use $ pState . pBallotNum
-    Ballot (prev, _) <- lift $ takeMVar var
-    let new = Ballot (prev + 1, i)
-    broadcastP $ Prepare new
-    lift $ putMVar var new
-  else
-    return ()
+  var <- use $ pState . pBallotNum
+  Ballot (prev, _) <- lift $ takeMVar var
+  let new = Ballot (prev + 1, i)
+  broadcastP $ Prepare new
+  lift $ putMVar var new
 
 maxAck :: [InstanceMessage] -> Value -- bad assumptions here, that all message will match this pattern
 maxAck acks = let Ack a b v = maximumBy (\(Ack _ a _ ) (Ack _ b _) -> compare a b) acks in v
