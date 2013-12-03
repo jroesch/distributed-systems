@@ -6,6 +6,8 @@ import Control.Concurrent
 import Control.Monad.State
 import Control.Monad
 import Control.Concurrent.Chan
+import Control.Concurrent.Timer
+import Control.Concurrent.Suspend.Lifted (msDelay)
 import qualified Data.Map as M
 import Data.Sequence
 -- Paxos Imports
@@ -65,23 +67,22 @@ proposeValue :: Chan Message -> MVar Int -> Directory -> Int -> String -> IO ()
 proposeValue chan instVar dir pid entry = do
   inst <- getInst instVar
   st <- initialState dir pid inst -- TODO: select correct instance
-  evalStateT (do
-    propose
-    loop inst
-    ) st
+  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 200
+  evalStateT (loop inst timer) st
   return ()
   where
-    loop inst = do
+    loop inst timer = do
       Message i msg <- lift $ readChan chan
       -- only read our instance methods
       if i == inst then do
         res <- proposer entry msg -- TODO: need to update inst if we fail
         case res of
-          Just True -> return () -- Successfully proposed
+          Just True -> lift $ stopTimer timer -- Successfully proposed
           Just False -> do -- someone else sucessfully proposed, TODO: try another instance?
             lift $ putStrLn "Failed to propose"
-          Nothing -> loop inst
-      else loop inst
+            lift $ stopTimer timer
+          Nothing -> loop inst timer
+      else loop inst timer
 
 runPaxos :: Directory -> Int -> MVar (Seq Entry) -> MVar Bool -> IO (Chan Message)
 runPaxos dir pid mvar fail = do

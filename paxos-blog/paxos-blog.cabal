@@ -25,7 +25,9 @@ executable paxos-blog
     hslogger >= 1.2.3,
     network >= 2.4.2.0,
     either >= 4.0,
-    vector
+    vector,
+    timers,
+    suspend
 
 test-suite test-paxos
   type:           exitcode-stdio-1.0
