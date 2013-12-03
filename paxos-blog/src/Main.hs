@@ -112,9 +112,7 @@ runAcceptors chan dir pid mvar = do
       case o of
         Just v -> do
           -- decided on value
-          if pid == 1 then
-            modifyMVar_ mvar (\var -> return $ var |> v)
-          else return ()
+          modifyMVar_ mvar (\var -> return $ var |> v)
         Nothing -> return ()
       loop $ replaceAtIndex i (Right s) a
     replaceAtIndex n item ls = a ++ (item:b) where (a, (_:b)) = Prelude.splitAt n ls
