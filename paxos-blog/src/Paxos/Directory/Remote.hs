@@ -49,20 +49,21 @@ mkDirectory port this config = do
     let connectList = filter ((> this) . first) config
     forM_ connectList $ \(pid, h, p) -> do
       rawChan <- R.newChan h p
-      R.writeChan rawChan (APid pid)
+      R.writeChan rawChan (APid this)
       process <- newMVar $ (Process pid rawChan) 
       modifyMVar_ dir $ \(chan, x) -> return $ (chan, M.insert pid process x)
-      forkIO $ do -- have thread dequeue values into mailbox
+      forkIO $ forever $ do -- have thread dequeue values into mailbox
         value <- R.readChan rawChan
         C.writeChan mailbox value
       return ()
     return dir
   where handler dir chan = modifyMVar_ dir $ \(mailbox, d) -> do
+          print $ M.keys d
           APid pid <- R.readChan chan
-          if pid > this
+          if pid >= this
             then error "Something is going with the connection process wrong."
             else do
-              forkIO $ do
+              forkIO $ forever $ do
                 value <- R.readChan chan
                 C.writeChan mailbox value
               p <- newMVar (Process pid chan)
@@ -93,10 +94,12 @@ receive mdir = do
 
 broadcast :: Directory -> Message -> IO ()
 broadcast d m = do
-    (_, dir) <- readMVar d
+    (mailbox, dir) <- readMVar d
     ps <- mapM readMVar $ M.elems dir
+    print $ M.size dir
+    C.writeChan mailbox $ AMessage m
     forM_ ps $
-      \(Process _ chan) -> R.writeChan chan $ AMessage m
+      \(Process _ chan) -> (R.writeChan chan $ AMessage m)
     debugM "paxos.message.recieve" $ "broadcasting " ++ show m
 
 

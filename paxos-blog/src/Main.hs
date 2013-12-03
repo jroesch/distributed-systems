@@ -52,7 +52,7 @@ setupLogging action = do
 main :: IO ()
 main = setupLogging $ do
   args <- getArgs
-  directory <- mkDirectory (read $ args !! 0 :: Int) (read $ args !! 1 :: Int)  [(1, "localhost", 9000), (2, "localhost", 9001)]
+  directory <- mkDirectory (read $ args !! 0 :: Int) (read $ args !! 1 :: Int)  [(1, "localhost", 9000), (2, "localhost", 9001), (3, "localhost", 9002)]
   let state = initialState directory
   list <- newMVar empty
   inst <- newMVar 0
@@ -69,7 +69,7 @@ proposeValue chan instVar dir pid entry = do
   inst <- getInst instVar
   st <- initialState dir pid inst -- TODO: select correct instance
   execStateT propose st -- initial proposal TODO: is this needed?
-  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 20000 -- TODO: configurable
+  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 2000000 -- TODO: configurable
   evalStateT (loop inst timer) st
   return ()
   where
