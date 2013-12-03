@@ -88,9 +88,9 @@ closeChan (MkChan (Connection _ handle) _) = hClose handle
 
 -- | Start the channel service which allows remote processes to open
 -- a channel.
-startChannelService :: forall a. (Serialize a, Show a) => ChannelRegistry a -> (Chan a -> IO ()) -> IO ()
-startChannelService reg handler = do
-  socket <- listenOn $ PortNumber 9000
+startChannelService :: forall a. (Serialize a, Show a) => Int -> ChannelRegistry a -> (Chan a -> IO ()) -> IO ()
+startChannelService port reg handler = do
+  socket <- listenOn $ PortNumber $ fromIntegral port
   forever $ do
     (handle, hname, port) <- accept socket
     forkIO $ do
@@ -115,7 +115,9 @@ startChannelService reg handler = do
 -- mode.
 connectToProcess :: (Serialize a) => String -> Int -> ChannelOp a -> IO (Chan a) -- fix portnumber buissness
 connectToProcess host port mode = do 
+  putStrLn "Before Connect!"
   handle <- connectTo host (PortNumber $ fromIntegral port) -- open
+  putStrLn "After Connect!"
   hWrite handle mode
   slot <- hRead handle
   let conn = Connection (ConnectionInfo host (fromIntegral port) slot) handle

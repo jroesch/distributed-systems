@@ -11,6 +11,8 @@ module Paxos.Directory.Remote
     broadcast
   ) where
 
+import Control.Concurrent (forkIO)
+import Control.Concurrent.Chan as C
 import Control.Concurrent.MVar
 import Control.Monad
 import Data.Functor ((<$>))
@@ -34,34 +36,41 @@ instance Show Process where
   show (Process pid _) = "Process " ++ show pid
 
 type Config = [(Pid, String, Int)]
-type Directory = MVar (M.Map Pid (MVar Process))
+type Directory = MVar (C.Chan RemoteMessage, M.Map Pid (MVar Process))
 
 -- need help here
-mkDirectory :: Pid -> Config -> IO Directory
-mkDirectory this config = do
+mkDirectory :: Int -> Pid -> Config -> IO Directory
+mkDirectory port this config = do
     reg <- R.channelRegistry
-    dir <- newMVar M.empty
-    R.startChannelService reg (handler dir) -- other processes will start to fill my slots
-    let connectList = filter ((> this) . third) config
+    mailbox <- C.newChan
+    dir <- newMVar (mailbox, M.empty)
+    forkIO $ R.startChannelService port reg (handler dir) -- other processes will start to fill my slots
+    let connectList = filter ((> this) . first) config
     forM_ connectList $ \(pid, h, p) -> do
       rawChan <- R.newChan h p
       R.writeChan rawChan (APid pid)
       process <- newMVar $ (Process pid rawChan) 
-      modifyMVar_ dir $ \x -> return $ M.insert pid process x
+      modifyMVar_ dir $ \(chan, x) -> return $ (chan, M.insert pid process x)
+      forkIO $ do -- have thread dequeue values into mailbox
+        value <- R.readChan rawChan
+        C.writeChan mailbox value
       return ()
     return dir
-  where handler dir chan = modifyMVar_ dir $ \d -> do
+  where handler dir chan = modifyMVar_ dir $ \(mailbox, d) -> do
           APid pid <- R.readChan chan
           if pid > this
-            then error "Something is going wrong."
-            else do 
+            then error "Something is going with the connection process wrong."
+            else do
+              forkIO $ do
+                value <- R.readChan chan
+                C.writeChan mailbox value
               p <- newMVar (Process pid chan)
-              return $ M.insert pid p d
-        third (_, _, z) = z
+              return $ (mailbox, M.insert pid p d)
+        first (x, _, _) = x
 
 plookup :: Directory -> Pid -> IO Process
 plookup mdir pid = do
-    dir <- readMVar mdir
+    (_, dir) <- readMVar mdir
     case pid `M.lookup` dir of
       Nothing -> error "NO PID #YOLO"
       Just v  -> readMVar v
@@ -71,9 +80,10 @@ send dir pid msg = do
     (Process _ chan) <- plookup dir pid
     R.writeChan chan (AMessage msg)
 
-receive :: Process -> IO Message
-receive (Process _ chan) = do
-    c <- R.readChan chan 
+receive :: Directory -> IO Message
+receive mdir = do
+    (chan, dir) <- readMVar mdir
+    c <- C.readChan chan 
     case c of
       AMessage m -> return m
       APid _     -> error "fucking pid"
@@ -84,4 +94,4 @@ broadcast d m = mapM_ writeMessage processes
         writeMessage (Process _ chan) = R.writeChan chan $ AMessage m
 
 size :: Directory -> IO Int
-size dir = readMVar dir >>= return . M.size
+size dir = readMVar dir >>= return . M.size . snd

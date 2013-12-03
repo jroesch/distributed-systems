@@ -19,6 +19,7 @@ import Paxos.Remote
 
 import System.Log.Logger
 import System.Log.Handler.Simple
+import System.Environment
 
 runConsole :: Chan Message -> MVar (Seq Entry) -> MVar Int -> MVar Bool -> Directory -> Int -> IO ()
 runConsole chan var instVar fail dir pid = runInputT defaultSettings loop
@@ -50,13 +51,14 @@ setupLogging action = do
 
 main :: IO ()
 main = setupLogging $ do
-  directory <- mkDirectory 1 [(1, "localhost", 9000), (2, "localhost", 9001)]
+  args <- getArgs
+  directory <- mkDirectory (read $ args !! 0 :: Int) (read $ args !! 1 :: Int)  [(1, "localhost", 9000), (2, "localhost", 9001)]
   let state = initialState directory
   list <- newMVar empty
   inst <- newMVar 0
   fail <- newMVar False
-  chans <- forM [1..5] (\i -> runPaxos directory i list fail)
-  runConsole (chans !! 1) list inst fail directory 1
+  chan <- runPaxos directory (read $ args !! 1 :: Int) list fail
+  runConsole chan list inst fail directory (read $ args !! 1 :: Int)
 
 getInst :: MVar Int -> IO Int
 getInst mvar = modifyMVar mvar (\v -> return (v + 1, v))
@@ -88,7 +90,7 @@ runPaxos :: Directory -> Int -> MVar (Seq Entry) -> MVar Bool -> IO (Chan Messag
 runPaxos dir pid mvar fail = do
   c <- newChan -- all messages will be sent through this channel
   forkIO $ forever $ do
-    msg <- receive =<< (plookup dir pid) 
+    msg <- receive dir
     b <- readMVar fail
     case b of
       False -> writeChan c msg

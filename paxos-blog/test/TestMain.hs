@@ -28,7 +28,7 @@ test_singleRemoteChannel = do
     putStrLn "running"
     mreg <- channelRegistry :: IO (ChannelRegistry String)
     ochan <- newEmptyMVar
-    tid <- forkIO $ startChannelService mreg (\c -> putMVar ochan c)
+    tid <- forkIO $ startChannelService 9000 mreg (\c -> putMVar ochan c)
     wChan <- (newChan "localhost" 9000) :: IO (Chan String)
     rChan <- takeMVar ochan
     putStrLn "before write"
