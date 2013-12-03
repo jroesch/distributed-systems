@@ -64,10 +64,11 @@ getInst mvar = modifyMVar mvar (\v -> return (v + 1, v))
 proposeValue :: Chan Message -> MVar Int -> Directory -> Int -> String -> IO ()
 proposeValue chan instVar dir pid entry = do
   inst <- getInst instVar
+  st <- initialState dir pid inst -- TODO: select correct instance
   evalStateT (do
     propose
     loop inst
-    ) $ initialState dir pid inst -- TODO: select correct instance
+    ) st
   return ()
   where
     loop inst = do
@@ -96,12 +97,15 @@ runPaxos dir pid mvar fail = do
 
 runAcceptors :: Chan Message -> Directory -> Int -> MVar (Seq Entry) -> IO ()
 runAcceptors chan dir pid mvar = do
-  loop $ [initialState dir pid i | i <- [0..]]
+  loop $ [Left i | i <- [0..]]
   where
     loop a = do
       Message i msg <- readChan chan
-      let inst = a !! i
-      (o, s) <- runStateT (acceptor msg) $ a !! i
+      let oInst = a !! i
+      inst <- case oInst of
+        Left ind -> initialState dir pid ind
+        Right st -> return st
+      (o, s) <- runStateT (acceptor msg) inst
       case o of
         Just v -> do
           -- decided on value
@@ -109,6 +113,6 @@ runAcceptors chan dir pid mvar = do
             modifyMVar_ mvar (\var -> return $ var |> v)
           else return ()
         Nothing -> return ()
-      loop $ replaceAtIndex i s a
+      loop $ replaceAtIndex i (Right s) a
     replaceAtIndex n item ls = a ++ (item:b) where (a, (_:b)) = Prelude.splitAt n ls
 

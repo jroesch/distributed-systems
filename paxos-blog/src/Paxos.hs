@@ -2,6 +2,7 @@
 module Paxos where
 
 import Control.Monad.State
+import Control.Concurrent
 import Control.Lens
 import Data.Maybe
 import qualified Data.Map as M
@@ -18,15 +19,15 @@ data ProcessState = ProcessState {
   , _dir     :: D.Directory
   , _pState  :: ProposerState
   , _aState  :: AcceptorState
-  } deriving (Show)
+  }
 
 data ProposerState = ProposerState {
-    _pBallotNum :: Ballot
+    _pBallotNum :: MVar Ballot
   , _pAcceptNum :: Ballot
   , _pAcceptVal :: Value
   , _ackM       :: ([InstanceMessage], Int) -- clean this up
   , _acceptedM  :: Int -- clean this up
-  } deriving (Show)
+  }
 
 data AcceptorState = AcceptorState {
     _aBallotNum :: Ballot
@@ -40,15 +41,16 @@ makeLenses ''ProcessState
 
 type PaxosInstance a = StateT ProcessState IO a
 
-initialState :: D.Directory -> D.Pid -> Int -> ProcessState
-initialState d pid inst = 
-  ProcessState {
+initialState :: D.Directory -> D.Pid -> Int -> IO ProcessState
+initialState d pid inst = do
+  v <- newMVar bNum
+  return ProcessState {
     _ident   = pid,
     _inst    = inst,
     _decided = Nothing,
     _dir     = d,
     _pState  = ProposerState {
-      _pBallotNum = bNum,
+      _pBallotNum = v,
       _pAcceptNum = aNum,
       _pAcceptVal = aVal,
       _ackM       = ([], 0),
@@ -81,10 +83,11 @@ propose :: PaxosInstance ()
 propose = do
   i <- use ident
   if i == 1 then do
-    Ballot (prev, _) <- use $ pState . pBallotNum
+    var <- use $ pState . pBallotNum
+    Ballot (prev, _) <- lift $ takeMVar var
     let new = Ballot (prev + 1, i)
-    pState . pBallotNum .= new
     broadcastP $ Prepare new
+    lift $ putMVar var new
   else
     return ()
 
@@ -121,8 +124,10 @@ acceptor msg = do
 proposer :: String -> InstanceMessage -> PaxosInstance (Maybe Bool)
 proposer value msg = do
     s <- use pState
-    case msg of
-      Ack bn b v | bn == s^.pBallotNum -> do
+    let var = s^.pBallotNum
+    ballotNum <- lift $ takeMVar var
+    a <- case msg of
+      Ack bn b v | bn == ballotNum -> do
         let (oldL, oldC) = s^.ackM
         let newL = msg : oldL
         let newC = oldC + 1
@@ -134,12 +139,12 @@ proposer value msg = do
                         else fromJust $ maxAck newL
             pState . pAcceptVal .= Just new
             pState . pAcceptNum .= bn
-            broadcastP $ Accept (s^.pBallotNum) new
+            broadcastP $ Accept ballotNum new
             return Nothing
           else do
             pState . ackM .= (newL, newC) -- clean up acceptM
             return Nothing
-      Accept b v | b == s^.pBallotNum -> do
+      Accept b v | b == ballotNum -> do
         let new = s^.acceptedM + 1
         pState . acceptedM .= new
         d <- use dir
@@ -150,3 +155,5 @@ proposer value msg = do
         else return Nothing
       Decide _ -> return $ Just False
       _ -> return Nothing
+    lift $ putMVar var ballotNum
+    return a
