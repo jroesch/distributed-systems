@@ -77,18 +77,19 @@ plookup mdir pid = do
       Just v  -> readMVar v
 
 send :: Directory -> Pid -> Message -> IO ()
-send dir pid msg = debugIO "paxos.message.send" (show (pid, msg)) $ do
+send dir pid msg = do
     (Process _ chan) <- plookup dir pid
     R.writeChan chan (AMessage msg)
+    debugM "paxos.message.send" (show (pid, msg))
 
 receive :: Directory -> IO Message
 receive mdir = do
     (chan, dir) <- readMVar mdir
-    debugIO "paxos.message.receive" "receiving message" $ do
-      c <- C.readChan chan 
-      case c of
-        AMessage m -> return m
-        APid _     -> error "fucking pid"
+    c <- C.readChan chan 
+    debugM "paxos.message.receive" $ "receiving message " ++ show c
+    case c of
+      AMessage m -> return m
+      APid _     -> error "fucking pid"
 
 broadcast :: Directory -> Message -> IO ()
 broadcast d m = do
@@ -96,6 +97,7 @@ broadcast d m = do
     ps <- mapM readMVar $ M.elems dir
     forM_ ps $
       \(Process _ chan) -> R.writeChan chan $ AMessage m
+    debugM "paxos.message.recieve" $ "broadcasting " ++ show m
 
 
 size :: Directory -> IO Int

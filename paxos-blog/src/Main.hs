@@ -69,7 +69,7 @@ proposeValue chan instVar dir pid entry = do
   inst <- getInst instVar
   st <- initialState dir pid inst -- TODO: select correct instance
   execStateT propose st -- initial proposal TODO: is this needed?
-  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 200 -- TODO: configurable
+  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 20000 -- TODO: configurable
   evalStateT (loop inst timer) st
   return ()
   where

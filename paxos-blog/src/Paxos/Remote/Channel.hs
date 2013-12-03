@@ -102,13 +102,13 @@ startChannelService port reg handler = do
           putStrLn "Opened new Channel"
           let info = ConnectionInfo hname port slot
               ch = MkChan (Connection info handle) chan -- build our chan
-          handler ch -- pass to handler
-          forever $ do -- loop reading values from handle and writing to channel
+          forkIO $ forever $ do -- loop reading values from handle and writing to channel
             msg <- hRead handle
             case msg of
               Write v -> C.writeChan chan v
               Close -> freeChannel reg slot
               x@_ -> error $ show x
+          handler ch -- pass to handler
         _ -> error "not sure what to do here"
     
 -- | Connect to remote process given hostname and port number and channel
