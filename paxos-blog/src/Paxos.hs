@@ -10,7 +10,7 @@ import Data.List
 import Data.Functor
 
 import Paxos.Message
-import qualified Paxos.Directory as D
+import qualified Paxos.Directory.Remote as D
 
 data ProcessState = ProcessState {
     _ident   :: Int
@@ -132,7 +132,8 @@ proposer value msg = do
         let newL = msg : oldL
         let newC = oldC + 1
         d <- use dir
-        if newC > div (M.size d) 2 && s^.pAcceptNum /= bn
+        size <- lift $ D.size d
+        if newC > div size 2 && s^.pAcceptNum /= bn
           then do
             let new = if all (\(Ack bal b v) -> isNothing v) newL 
                         then value
@@ -147,8 +148,8 @@ proposer value msg = do
       Accept b v | b == ballotNum -> do
         let new = s^.acceptedM + 1
         pState . acceptedM .= new
-        d <- use dir
-        if new == M.size d - 1 -- TODO: one failure
+        size <- use dir >>= lift . D.size
+        if new == size - 1 -- TODO: one failure
         then do
           broadcastP $ Decide v
           return $ Just True

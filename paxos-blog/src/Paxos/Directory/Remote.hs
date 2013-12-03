@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric, TupleSections #-}
 module Paxos.Directory.Remote 
   ( Directory,
+    size,
     Process,
     Pid,
     mkDirectory,
@@ -81,3 +82,6 @@ broadcast :: Directory -> Message -> IO ()
 broadcast d m = mapM_ writeMessage processes 
   where processes = undefined -- map snd $ M.toList d what to do here?
         writeMessage (Process _ chan) = R.writeChan chan $ AMessage m
+
+size :: Directory -> IO Int
+size dir = readMVar dir >>= return . M.size
