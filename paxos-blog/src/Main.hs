@@ -59,6 +59,7 @@ configFromFile = do
 
 main :: IO ()
 main = setupLogging $ do
+  putStrLn "Version 1"
   args <- getArgs
   let port = (read $ args !! 0 :: Int)
       pid  = (read $ args !! 1 :: Int)
