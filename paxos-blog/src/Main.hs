@@ -85,7 +85,7 @@ proposeValue chan instVar dir pid entry = do
   inst <- getInst instVar
   st <- initialState dir pid inst instVar
   execStateT propose st -- initial proposal TODO: is this needed?
-  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 500 -- TODO: configurable
+  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 5000 -- TODO: configurable
   evalStateT (loop inst timer) st
   return ()
   where
@@ -118,7 +118,7 @@ runPaxos dir pid instVar mvar fail = do
           return ()
       Have i v -> do
         modifyMVar_ mvar $ \vec -> do
-          let diff = V.length v - V.length vec
+          let diff = V.length v + i - V.length vec
           let vvec = if diff > 0 then vec V.++ (V.replicate diff Nothing) else vec
           let out = vvec `update` V.filter (isJust . snd) (V.map (\(a, b) -> (a+i,b)) $ indexed v)
           return out
