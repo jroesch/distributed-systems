@@ -22,7 +22,7 @@ import System.Log.Handler.Simple
 import System.Environment
 import System.IO
 
-runConsole :: Chan Message -> MVar (Seq Entry) -> MVar Int -> MVar Bool -> Directory -> Int -> IO ()
+runConsole :: Chan Entry -> MVar (Seq Entry) -> MVar Int -> MVar Bool -> Directory -> Int -> IO ()
 runConsole chan var instVar fail dir pid = runInputT defaultSettings loop
     where loop = do
             minput <- getInputLine "> "
@@ -31,10 +31,7 @@ runConsole chan var instVar fail dir pid = runInputT defaultSettings loop
               Just "exit" -> return ()
               Just input  -> do
                 case input of
-                  'p':'o':'s':'t':' ':rest -> do
-                    c <- lift $ dupChan chan
-                    lift $ forkIO $ proposeValue c instVar dir pid rest
-                    return ()
+                  'p':'o':'s':'t':' ':rest -> lift $ writeChan chan rest
                   "read" -> lift $ readMVar var >>= print
                   "fail" -> lift $ modifyMVar_ fail (\_ -> return True)
                   "unfail" -> lift $ modifyMVar_ fail (\_ -> return False)
@@ -63,11 +60,16 @@ main = setupLogging $ do
   config <- configFromFile
   directory <- mkDirectory port pid config
   let state = initialState directory
+  proposeChan <- newChan
   list <- newMVar empty
   inst <- newMVar 0
   fail <- newMVar False
-  chan <- runPaxos directory pid list fail
-  runConsole chan list inst fail directory pid
+  chan <- runPaxos directory pid inst list fail
+  pChan <- dupChan chan -- chan for proposer to read from
+  forkIO $ forever $ do -- try to propose new values
+    r <- readChan proposeChan
+    proposeValue pChan inst directory pid r
+  runConsole proposeChan list inst fail directory pid
 
 getInst :: MVar Int -> IO Int
 getInst mvar = modifyMVar mvar (\v -> return (v + 1, v))
@@ -76,7 +78,7 @@ getInst mvar = modifyMVar mvar (\v -> return (v + 1, v))
 proposeValue :: Chan Message -> MVar Int -> Directory -> Int -> String -> IO ()
 proposeValue chan instVar dir pid entry = do
   inst <- getInst instVar
-  st <- initialState dir pid inst -- TODO: select correct instance
+  st <- initialState dir pid inst instVar
   execStateT propose st -- initial proposal TODO: is this needed?
   timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 2000000 -- TODO: configurable
   evalStateT (loop inst timer) st
@@ -90,13 +92,15 @@ proposeValue chan instVar dir pid entry = do
         case res of
           Just True -> lift $ stopTimer timer -- Successfully proposed
           Just False -> do -- someone else sucessfully proposed, TODO: try another instance?
-            lift $ putStrLn "Failed to propose"
+            lift $ modifyMVar_ instVar $ \oldInst -> return $ max oldInst (inst + 1)
+            lift $ debugM "paxos.propose" $ "Proposal in instance " ++ show inst ++ " failed"
             lift $ stopTimer timer
+            lift $ proposeValue chan instVar dir pid entry
           Nothing -> loop inst timer
       else loop inst timer
 
-runPaxos :: Directory -> Int -> MVar (Seq Entry) -> MVar Bool -> IO (Chan Message)
-runPaxos dir pid mvar fail = do
+runPaxos :: Directory -> Int -> MVar Int -> MVar (Seq Entry) -> MVar Bool -> IO (Chan Message)
+runPaxos dir pid instVar mvar fail = do
   c <- newChan -- all messages will be sent through this channel
   forkIO $ forever $ do
     msg <- receive dir
@@ -104,18 +108,18 @@ runPaxos dir pid mvar fail = do
     case b of
       False -> writeChan c msg
       True -> return ()
-  forkIO $ runAcceptors c dir pid mvar
+  forkIO $ runAcceptors c instVar dir pid mvar
   return c
 
-runAcceptors :: Chan Message -> Directory -> Int -> MVar (Seq Entry) -> IO ()
-runAcceptors chan dir pid mvar = do
+runAcceptors :: Chan Message -> MVar Int -> Directory -> Int -> MVar (Seq Entry) -> IO ()
+runAcceptors chan instVar dir pid mvar = do
   loop $ [Left i | i <- [0..]]
   where
     loop a = do
       Message i msg <- readChan chan
       let oInst = a !! i
       inst <- case oInst of
-        Left ind -> initialState dir pid ind
+        Left ind -> initialState dir pid ind instVar
         Right st -> return st
       (o, s) <- runStateT (acceptor msg) inst
       case o of

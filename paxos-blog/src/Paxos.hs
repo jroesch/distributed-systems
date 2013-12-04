@@ -33,7 +33,8 @@ data AcceptorState = AcceptorState {
     _aBallotNum :: Ballot
   , _aAcceptNum :: Ballot
   , _aAcceptVal :: Value
-  } deriving (Show)
+  , _instVar    :: MVar Int
+  }
 
 makeLenses ''ProposerState
 makeLenses ''AcceptorState
@@ -41,8 +42,8 @@ makeLenses ''ProcessState
 
 type PaxosInstance a = StateT ProcessState IO a
 
-initialState :: D.Directory -> D.Pid -> Int -> IO ProcessState
-initialState d pid inst = do
+initialState :: D.Directory -> D.Pid -> Int -> MVar Int -> IO ProcessState
+initialState d pid inst instVar = do
   v <- newMVar bNum
   return ProcessState {
     _ident   = pid,
@@ -59,7 +60,8 @@ initialState d pid inst = do
     _aState = AcceptorState {
       _aBallotNum = bNum,
       _aAcceptNum = aNum,
-      _aAcceptVal = aVal
+      _aAcceptVal = aVal,
+      _instVar    = instVar
     }
   }
   where
@@ -104,6 +106,9 @@ acceptor msg = do
       Nothing -> do
         case msg of
           Prepare bn | bn >= (view aBallotNum s) -> do
+            -- update the current highest instance
+            inst <- use inst
+            lift $ modifyMVar_ (s ^. instVar) $ \i -> return $ max i (inst +1)
             aState . aBallotNum .= bn
             broadcastP $ Ack bn (view aAcceptNum s) (view aAcceptVal s)
             return Nothing
