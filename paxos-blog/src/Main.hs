@@ -32,10 +32,10 @@ runConsole chan var instVar fail dir pid = runInputT defaultSettings loop
               Just "exit" -> return ()
               Just input  -> do
                 case input of
-                  'p':'o':'s':'t':' ':rest -> lift $ writeChan chan rest
-                  "read" -> lift $ readMVar var >>= print . catMaybes . toList
-                  "fail" -> lift $ modifyMVar_ fail (\_ -> return True)
-                  "unfail" -> do
+                  'p':'o':'s':'t':'(':rest -> lift $ writeChan chan $ P.init rest
+                  "read()" -> lift $ readMVar var >>= print . catMaybes . toList
+                  "fail()" -> lift $ modifyMVar_ fail (\_ -> return True)
+                  "unfail()" -> do
                     lift $ modifyMVar_ fail (\_ -> return False)
                     -- TODO: unfail last
                     i <- lift $ readMVar instVar
