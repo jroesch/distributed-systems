@@ -63,6 +63,7 @@ main = setupLogging $ do
   args <- getArgs
   let port = (read $ args !! 0 :: Int)
       pid  = (read $ args !! 1 :: Int)
+      opt  = (read $ args !! 2 :: Bool)
   config <- configFromFile
   directory <- mkDirectory port pid config
   let state = initialState directory
@@ -74,7 +75,11 @@ main = setupLogging $ do
   pChan <- dupChan chan -- chan for proposer to read from
   forkIO $ forever $ do -- try to propose new values
     r <- readChan proposeChan
-    forkIO $ proposeValue pChan inst directory pid r -- remove forkio for no optimization
+    if opt then do
+      forkIO $ proposeValue pChan inst directory pid r
+      return ()
+    else
+      proposeValue pChan inst directory pid r
   runConsole proposeChan list inst fail directory pid
 
 getInst :: MVar Int -> IO Int
