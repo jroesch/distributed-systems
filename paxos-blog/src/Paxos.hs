@@ -25,8 +25,8 @@ data ProposerState = ProposerState {
     _pBallotNum :: MVar Ballot
   , _pAcceptNum :: Ballot
   , _pAcceptVal :: Value
-  , _ackM       :: ([InstanceMessage], Int) -- clean this up
-  , _acceptedM  :: Int -- clean this up
+  , _ackM       :: MVar ([InstanceMessage], Int) -- clean this up
+  , _acceptedM  :: MVar Int -- clean this up
   }
 
 data AcceptorState = AcceptorState {
@@ -45,6 +45,8 @@ type PaxosInstance a = StateT ProcessState IO a
 initialState :: D.Directory -> D.Pid -> Int -> MVar Int -> IO ProcessState
 initialState d pid inst instVar = do
   v <- newMVar bNum
+  ackM <- newMVar ([], 0)
+  acceptedM <- newMVar 0
   return ProcessState {
     _ident   = pid,
     _inst    = inst,
@@ -54,8 +56,8 @@ initialState d pid inst instVar = do
       _pBallotNum = v,
       _pAcceptNum = aNum,
       _pAcceptVal = aVal,
-      _ackM       = ([], 0),
-      _acceptedM  = 0
+      _ackM       = ackM,
+      _acceptedM  = acceptedM
     },
     _aState = AcceptorState {
       _aBallotNum = bNum,
@@ -84,11 +86,14 @@ sendP p m = do
 propose :: PaxosInstance ()
 propose = do
   i <- use ident
-  var <- use $ pState . pBallotNum
-  Ballot (prev, _) <- lift $ takeMVar var
+  s <- use pState
+  Ballot (prev, _) <- lift $ takeMVar $ s^.pBallotNum
   let new = Ballot (prev + 1, i)
+  -- reset acks and accepted
+  lift $ modifyMVar_ (s^.ackM) $ \_ -> return ([], 0)
+  lift $ modifyMVar_ (s^.acceptedM) $ \_ -> return 0
   broadcastP $ Prepare new
-  lift $ putMVar var new
+  lift $ putMVar (s^.pBallotNum) new
 
 maxAck :: [InstanceMessage] -> Value -- bad assumptions here, that all message will match this pattern
 maxAck acks = let Ack a b v = maximumBy (\(Ack _ a _ ) (Ack _ b _) -> compare a b) acks in v
@@ -132,7 +137,7 @@ proposer value msg = do
     ballotNum <- lift $ takeMVar var
     a <- case msg of
       Ack bn b v | bn == ballotNum -> do
-        let (oldL, oldC) = s^.ackM
+        (oldL, oldC) <- lift $ takeMVar $ s^.ackM
         let newL = msg : oldL
         let newC = oldC + 1
         d <- use dir
@@ -144,14 +149,14 @@ proposer value msg = do
                         else fromJust $ maxAck newL
             pState . pAcceptVal .= Just new
             pState . pAcceptNum .= bn
+            lift $ putMVar (s^.ackM) (newL, newC)
             broadcastP $ Accept ballotNum new
             return Nothing
           else do
-            pState . ackM .= (newL, newC) -- clean up acceptM
+            lift $ putMVar (s^.ackM) (newL, newC)
             return Nothing
       Accept b v | b == ballotNum -> do
-        let new = s^.acceptedM + 1
-        pState . acceptedM .= new
+        new <- lift $ modifyMVar (s^.acceptedM) $ \old -> return (old + 1, old + 1)
         size <- use dir >>= lift . D.size
         if new == size - 1 -- TODO: one failure
         then do

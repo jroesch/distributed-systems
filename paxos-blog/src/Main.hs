@@ -80,7 +80,7 @@ proposeValue chan instVar dir pid entry = do
   inst <- getInst instVar
   st <- initialState dir pid inst instVar
   execStateT propose st -- initial proposal TODO: is this needed?
-  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 2000000 -- TODO: configurable
+  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 2000 -- TODO: configurable
   evalStateT (loop inst timer) st
   return ()
   where

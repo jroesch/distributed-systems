@@ -58,7 +58,6 @@ mkDirectory port this config = do
       return ()
     return dir
   where handler dir chan = modifyMVar_ dir $ \(mailbox, d) -> do
-          print $ M.keys d
           APid pid <- R.readChan chan
           if pid >= this
             then error "Something is going with the connection process wrong."
@@ -96,7 +95,6 @@ broadcast :: Directory -> Message -> IO ()
 broadcast d m = do
     (mailbox, dir) <- readMVar d
     ps <- mapM readMVar $ M.elems dir
-    print $ M.size dir
     C.writeChan mailbox $ AMessage m
     forM_ ps $
       \(Process _ chan) -> (R.writeChan chan $ AMessage m)

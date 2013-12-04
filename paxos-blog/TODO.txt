@@ -2,7 +2,4 @@ TODO
 ----
 
 1. Bringing old replicas up to speed
-3. check that failure and proposal work correctly together
-4. what happens if our proposal fails? we can try next instance, but we might get a weird ordering of events
-5. allow proposal of multiple values to be turned on or off. also, does proposing multiple values actually need partial ordering?
 6. TEST!!!
