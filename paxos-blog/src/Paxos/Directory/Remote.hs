@@ -73,7 +73,7 @@ plookup :: Directory -> Pid -> IO Process
 plookup mdir pid = do
     (_, dir) <- readMVar mdir
     case pid `M.lookup` dir of
-      Nothing -> error "NO PID #YOLO"
+      Nothing -> error $ "NO PID #YOLO " ++ show pid
       Just v  -> readMVar v
 
 send :: Directory -> Pid -> Message -> IO ()

@@ -1,8 +1,10 @@
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric, FlexibleInstances #-}
 module Paxos.Message where
 
 import Data.Serialize
+import Data.Serialize.Get
 import GHC.Generics
+import Data.Vector
 
 type Entry = String
 type Value = Maybe Entry
@@ -25,7 +27,15 @@ data InstanceMessage = Prepare Ballot
 
 instance Serialize InstanceMessage
 
-data Message = Message Int InstanceMessage 
+instance Serialize (Vector Value) where
+    put = put . toList
+    get = do
+      a <- getListOf get
+      return $ fromList a
+
+data Message = Message Int InstanceMessage
+             | Learn Int Int -- we want to come up to speed pid, least unknown
+             | Have Int (Vector Value)
              deriving (Show, Generic)
 
 instance Serialize Message

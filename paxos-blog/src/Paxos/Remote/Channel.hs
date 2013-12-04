@@ -99,7 +99,6 @@ startChannelService port reg handler = do
         New -> do
           (slot, chan) <- allocateChannel reg
           hWrite handle slot
-          putStrLn "Opened new Channel"
           let info = ConnectionInfo hname port slot
               ch = MkChan (Connection info handle) chan -- build our chan
           forkIO $ forever $ do -- loop reading values from handle and writing to channel
@@ -115,9 +114,7 @@ startChannelService port reg handler = do
 -- mode.
 connectToProcess :: (Serialize a) => String -> Int -> ChannelOp a -> IO (Chan a) -- fix portnumber buissness
 connectToProcess host port mode = do 
-  putStrLn "Before Connect!"
   handle <- connectTo host (PortNumber $ fromIntegral port) -- open
-  putStrLn "After Connect!"
   hWrite handle mode
   slot <- hRead handle
   let conn = Connection (ConnectionInfo host (fromIntegral port) slot) handle

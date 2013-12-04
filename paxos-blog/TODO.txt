@@ -1,5 +1,7 @@
 TODO
 ----
 
-1. Bringing old replicas up to speed
+1. Bringing old replicas up to speed. how?
+2. re 1. make sure if we propose on something that we have an accepted value lower down,
+  maybe periodically post on non finished smaller instances to try and get a result
 6. TEST!!!

@@ -1,7 +1,8 @@
 module Main where
 
+import Prelude as P hiding (replicate)
 import Data.Functor ((<$>))
-import Data.IORef
+import Data.Maybe
 import Control.Concurrent
 import Control.Monad.State
 import Control.Monad
@@ -9,7 +10,7 @@ import Control.Concurrent.Chan
 import Control.Concurrent.Timer
 import Control.Concurrent.Suspend.Lifted (msDelay)
 import qualified Data.Map as M
-import Data.Sequence
+import Data.Vector as V
 -- Paxos Imports
 import System.Console.Haskeline
 import Paxos
@@ -22,7 +23,7 @@ import System.Log.Handler.Simple
 import System.Environment
 import System.IO
 
-runConsole :: Chan Entry -> MVar (Seq Entry) -> MVar Int -> MVar Bool -> Directory -> Int -> IO ()
+runConsole :: Chan Entry -> MVar (Vector Value) -> MVar Int -> MVar Bool -> Directory -> Int -> IO ()
 runConsole chan var instVar fail dir pid = runInputT defaultSettings loop
     where loop = do
             minput <- getInputLine "> "
@@ -32,9 +33,13 @@ runConsole chan var instVar fail dir pid = runInputT defaultSettings loop
               Just input  -> do
                 case input of
                   'p':'o':'s':'t':' ':rest -> lift $ writeChan chan rest
-                  "read" -> lift $ readMVar var >>= print
+                  "read" -> lift $ readMVar var >>= print . catMaybes . toList
                   "fail" -> lift $ modifyMVar_ fail (\_ -> return True)
-                  "unfail" -> lift $ modifyMVar_ fail (\_ -> return False)
+                  "unfail" -> do
+                    lift $ modifyMVar_ fail (\_ -> return False)
+                    -- TODO: unfail last
+                    i <- lift $ readMVar instVar
+                    lift $ broadcast dir $ Learn pid i
                   _ -> lift $ putStrLn "invalid command"
                 loop
 
@@ -80,7 +85,7 @@ proposeValue chan instVar dir pid entry = do
   inst <- getInst instVar
   st <- initialState dir pid inst instVar
   execStateT propose st -- initial proposal TODO: is this needed?
-  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 2000 -- TODO: configurable
+  timer <- repeatedTimer (execStateT propose st >> return ()) $ msDelay 500 -- TODO: configurable
   evalStateT (loop inst timer) st
   return ()
   where
@@ -93,25 +98,38 @@ proposeValue chan instVar dir pid entry = do
           Just True -> lift $ stopTimer timer -- Successfully proposed
           Just False -> do -- someone else sucessfully proposed, TODO: try another instance?
             lift $ modifyMVar_ instVar $ \oldInst -> return $ max oldInst (inst + 1)
-            lift $ debugM "paxos.propose" $ "Proposal in instance " ++ show inst ++ " failed"
+            lift $ debugM "paxos.propose" $ "Proposal in instance " P.++ show inst P.++ " failed"
             lift $ stopTimer timer
             lift $ proposeValue chan instVar dir pid entry
           Nothing -> loop inst timer
       else loop inst timer
 
-runPaxos :: Directory -> Int -> MVar Int -> MVar (Seq Entry) -> MVar Bool -> IO (Chan Message)
+runPaxos :: Directory -> Int -> MVar Int -> MVar (Vector Value) -> MVar Bool -> IO (Chan Message)
 runPaxos dir pid instVar mvar fail = do
   c <- newChan -- all messages will be sent through this channel
   forkIO $ forever $ do
     msg <- receive dir
-    b <- readMVar fail
-    case b of
-      False -> writeChan c msg
-      True -> return ()
+    case msg of
+      Learn oPid i -> if oPid /= pid then do
+          vec <- readMVar mvar
+          send dir oPid $ Have i (V.drop i vec)
+        else
+          return ()
+      Have i v -> do
+        modifyMVar_ mvar $ \vec -> do
+          let diff = V.length v - V.length vec
+          let vvec = if diff > 0 then vec V.++ (V.replicate diff Nothing) else vec
+          let out = vvec `update` V.filter (isJust . snd) (V.map (\(a, b) -> (a+i,b)) $ indexed v)
+          return out
+      _ -> do
+        b <- readMVar fail
+        case b of
+          False -> writeChan c msg
+          True -> return ()
   forkIO $ runAcceptors c instVar dir pid mvar
   return c
 
-runAcceptors :: Chan Message -> MVar Int -> Directory -> Int -> MVar (Seq Entry) -> IO ()
+runAcceptors :: Chan Message -> MVar Int -> Directory -> Int -> MVar (Vector Value) -> IO ()
 runAcceptors chan instVar dir pid mvar = do
   loop $ [Left i | i <- [0..]]
   where
@@ -123,10 +141,11 @@ runAcceptors chan instVar dir pid mvar = do
         Right st -> return st
       (o, s) <- runStateT (acceptor msg) inst
       case o of
-        Just v -> do
-          -- decided on value
-          modifyMVar_ mvar (\var -> return $ var |> v)
+        Just v -> modifyMVar_ mvar (\var -> do -- decided on value
+            let diff = i - V.length var
+            let vec = if diff >= 0 then var V.++ (replicate (diff + 1) Nothing) else var
+            return $ vec // [(i, Just v)])
         Nothing -> return ()
       loop $ replaceAtIndex i (Right s) a
-    replaceAtIndex n item ls = a ++ (item:b) where (a, (_:b)) = Prelude.splitAt n ls
+    replaceAtIndex n item ls = a P.++ (item:b) where (a, (_:b)) = P.splitAt n ls
 
