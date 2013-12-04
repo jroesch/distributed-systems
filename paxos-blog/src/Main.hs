@@ -73,7 +73,7 @@ main = setupLogging $ do
   pChan <- dupChan chan -- chan for proposer to read from
   forkIO $ forever $ do -- try to propose new values
     r <- readChan proposeChan
-    proposeValue pChan inst directory pid r
+    forkIO $ proposeValue pChan inst directory pid r -- remove forkio for no optimization
   runConsole proposeChan list inst fail directory pid
 
 getInst :: MVar Int -> IO Int
@@ -100,7 +100,8 @@ proposeValue chan instVar dir pid entry = do
             lift $ modifyMVar_ instVar $ \oldInst -> return $ max oldInst (inst + 1)
             lift $ debugM "paxos.propose" $ "Proposal in instance " P.++ show inst P.++ " failed"
             lift $ stopTimer timer
-            lift $ proposeValue chan instVar dir pid entry
+            lift $ putStrLn $ "Failed to write " P.++ entry
+            -- lift $ proposeValue chan instVar dir pid entry
           Nothing -> loop inst timer
       else loop inst timer
 

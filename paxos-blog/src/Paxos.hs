@@ -113,7 +113,6 @@ acceptor msg = do
           Prepare bn | bn >= (view aBallotNum s) -> do
             -- update the current highest instance
             inst <- use inst
-            -- !!!!!!!!!!!!!!!!!!! TOGGLE FOLLOWING LINE FOR OPTIMIZATION
             lift $ modifyMVar_ (s ^. instVar) $ \i -> return $ max i (inst +1)
             aState . aBallotNum .= bn
             broadcastP $ Ack bn (view aAcceptNum s) (view aAcceptVal s)
