@@ -122,6 +122,7 @@ runPaxos dir pid instVar mvar fail = do
           let diff = V.length v + i - V.length vec
           let vvec = if diff > 0 then vec V.++ (V.replicate diff Nothing) else vec
           let out = vvec `update` V.filter (isJust . snd) (V.map (\(a, b) -> (a+i,b)) $ indexed v)
+          modifyMVar_ instVar (\inst -> return $ max inst (V.length out))
           return out
       _ -> do
         b <- readMVar fail
