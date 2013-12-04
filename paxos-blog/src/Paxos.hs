@@ -158,7 +158,7 @@ proposer value msg = do
       Accept b v | b == ballotNum -> do
         new <- lift $ modifyMVar (s^.acceptedM) $ \old -> return (old + 1, old + 1)
         size <- use dir >>= lift . D.size
-        if new == size - 1 -- TODO: one failure
+        if new == size - 2 -- TODO: one failure
         then do
           broadcastP $ Decide v
           return $ Just True
